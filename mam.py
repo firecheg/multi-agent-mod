@@ -517,9 +517,8 @@ def run_graph(spec, inputs, quiet=False):
 def cmd_doctor(a):
     print(f"harness   {HOME}")
     print(f"workspace {WORK}   (agents run here; override with MAM_WORKSPACE)")
-    seeded = "bundled seed — set MAM_MEMORY to keep notes out of the clone" \
-        if MEM == HOME / "memory" else "private"
-    print(f"vault     {MEM}   ({seeded})")
+    print(f"vault     {MEM}" + ("   (bundled seed — set MAM_MEMORY to keep notes"
+                                " out of the clone)" if MEM == HOME / "memory" else ""))
     for name, spec in CFG["agents"].items():
         exe = installed(name)
         print(f"{'OK  ' if exe else 'MISS'} {name:8} {exe or spec['install']}")
