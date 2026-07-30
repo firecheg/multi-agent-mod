@@ -31,8 +31,10 @@ from pathlib import Path
 # invoked the command, so the same harness serves every repo on the machine.
 # Agent output is printed verbatim and is routinely non-English, but a Windows
 # console inherits a legacy code page and mangles it. Force UTF-8 on the way
-# out rather than sanitising every message that might carry a dash.
-for _s in (sys.stdout, sys.stderr):
+# out rather than sanitising every message that might carry a dash — and on the
+# way IN too: `mem write` takes the note body on stdin, and decoding UTF-8 bytes
+# as cp1251 wrote a permanently mojibaked note into the vault.
+for _s in (sys.stdin, sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8", errors="replace")
 

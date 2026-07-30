@@ -186,6 +186,20 @@ finally:
     shutil.rmtree(_nd, ignore_errors=True)
     del mam.CFG["agents"]["_null"]
 
+# --- a note piped in on stdin must survive the round trip ------------------
+# Windows decodes stdin with the console code page, so UTF-8 bytes came back
+# as cp1251 and mem write stored a double-encoded note. Nothing failed; the
+# vault just filled with unreadable text.
+_body = "агент резолвит пути от --add-dir, а не от cwd"
+with tempfile.TemporaryDirectory() as td:
+    subprocess.run([sys.executable, str(mam.HOME / "mam.py"), "mem", "write",
+                    "--folder", "brain", "--name", "probe", "--description", "d",
+                    "--type", "gotcha", "--reach", "global"],
+                   input=_body.encode("utf-8"), cwd=str(mam.HOME), check=True,
+                   capture_output=True, env={**os.environ, "MAM_MEMORY": td})
+    _back = (pathlib.Path(td) / "brain" / "probe.md").read_text(encoding="utf-8")
+    assert _body in _back, f"stdin mangled on the way into the vault: {_back!r}"
+
 # --- a BOM in out.md must not ride into the next node's prompt -------------
 # codex writes one; under plain utf-8 it survived as ﻿, reached every
 # downstream prompt, and crashed any console that was not UTF-8.
