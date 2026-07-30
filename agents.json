@@ -1,0 +1,89 @@
+{
+  "_": "Argv templates. {prompt} is a SHORT bootstrap string; the real prompt lives in a file (Windows argv limit + quoting hell).",
+  "agents": {
+    "claude": {
+      "bin": "claude",
+      "args": [
+        "-p",
+        "{prompt}",
+        "--permission-mode",
+        "acceptEdits",
+        "--add-dir",
+        "{mem}"
+      ],
+      "role": "orchestrator, judge, architecture, spec-writing, long-context synthesis, final call",
+      "install": "npm i -g @anthropic-ai/claude-code"
+    },
+    "codex": {
+      "bin": [
+        "~/AppData/Local/OpenAI/Codex/bin/*/codex.exe",
+        "codex"
+      ],
+      "args": [
+        "exec",
+        "--full-auto",
+        "--skip-git-repo-check",
+        "--add-dir",
+        "{mem}",
+        "{prompt}"
+      ],
+      "role": "implementation, refactors, precise diffs, tests, sandboxed execution",
+      "install": "npm i -g @openai/codex",
+      "note": "--full-auto = workspace-write sandbox, NO network. Add sandbox:danger-full-access per-node if net is needed."
+    },
+    "agy": {
+      "bin": [
+        "~/AppData/Local/agy/bin/agy.exe",
+        "agy"
+      ],
+      "args": [
+        "-p",
+        "{prompt}",
+        "--dangerously-skip-permissions",
+        "--sandbox",
+        "--add-dir",
+        "{mem}",
+        "--print-timeout",
+        "30m"
+      ],
+      "role": "web research, huge-context reading, multimodal / visual verification",
+      "install": "irm https://antigravity.google/cli/install.ps1 | iex   (then run `agy` once to log in)",
+      "note": "Antigravity CLI 1.1.8. Replaced gemini-cli for individual accounts on 2026-06-18. Without --dangerously-skip-permissions headless tool calls are soft-denied, so it cannot write out.md; --sandbox is kept alongside it so auto-approval is not also unrestricted (verified: it still reads files and writes out.md). --print-timeout takes a Go duration and defaults to 5m0s, too short for a build node."
+    },
+    "gemini": {
+      "bin": "gemini",
+      "args": [
+        "-y",
+        "--skip-trust",
+        "-p",
+        "{prompt}"
+      ],
+      "role": "same as agy; only works on a PAID Gemini API key, Code Assist Standard/Enterprise, or Google Cloud",
+      "install": "npm i -g @google/gemini-cli",
+      "note": "Individual/AI Pro/AI Ultra OAuth was cut off 2026-06-18 — use agy instead. Kept for paid-API-key setups."
+    }
+  },
+  "_reviewers": "Preference order for picking a cross-reviewer. Author is ALWAYS excluded (no self-review).",
+  "reviewers": {
+    "codex": [
+      "claude",
+      "agy",
+      "gemini"
+    ],
+    "agy": [
+      "claude",
+      "codex"
+    ],
+    "gemini": [
+      "claude",
+      "codex"
+    ],
+    "claude": [
+      "codex",
+      "agy",
+      "gemini"
+    ]
+  },
+  "timeout": 1800,
+  "memory_k": 5
+}

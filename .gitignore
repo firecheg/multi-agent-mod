@@ -1,0 +1,4 @@
+.mam/
+.runs/
+__pycache__/
+*.pyc

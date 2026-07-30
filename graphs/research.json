@@ -1,0 +1,24 @@
+{
+  "name": "research",
+  "_": "Fan-out / join. Two independent lenses run in parallel (web vs. local code), then one synthesis node reconciles them. Router-style: each lens goes to the model that is actually good at it.",
+  "concurrency": 3,
+  "nodes": [
+    {
+      "id": "web",
+      "agent": "agy",
+      "prompt": "Research this on the live web. Prefer primary sources (official docs, source repos, release notes) over blog summaries.\n\nQUESTION:\n{input}\n\nOutput: findings as claims, each with the URL that supports it, each marked [confirmed] or [uncertain]. Note explicitly what you could NOT verify."
+    },
+    {
+      "id": "local",
+      "agent": "codex",
+      "prompt": "Answer this from THIS repository only — code, configs, git history. Do not use outside knowledge.\n\nQUESTION:\n{input}\n\nOutput: what the codebase actually does today, with file:line citations. State plainly where the repo is silent."
+    },
+    {
+      "id": "synth",
+      "agent": "claude",
+      "needs": ["web", "local"],
+      "remember": true,
+      "prompt": "Reconcile two independent research passes. You ran neither.\n\nQUESTION:\n{input}\n\nWEB (agy):\n{web}\n\nREPO (codex):\n{local}\n\nWhere they agree, state it once. Where they conflict, name the conflict and say which source wins and why. Where both are silent, say so — do not fill the gap from your own priors. End with the answer to the question and the one thing most worth verifying next."
+    }
+  ]
+}
