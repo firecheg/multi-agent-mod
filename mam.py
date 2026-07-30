@@ -31,8 +31,10 @@ from pathlib import Path
 # invoked the command, so the same harness serves every repo on the machine.
 # Agent output is printed verbatim and is routinely non-English, but a Windows
 # console inherits a legacy code page and mangles it. Force UTF-8 on the way
-# out rather than sanitising every message that might carry a dash.
-for _s in (sys.stdout, sys.stderr):
+# out rather than sanitising every message that might carry a dash — and on the
+# way IN too: `mem write` takes the note body on stdin, and decoding UTF-8 bytes
+# as cp1251 wrote a permanently mojibaked note into the vault.
+for _s in (sys.stdin, sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8", errors="replace")
 
@@ -247,11 +249,14 @@ def run_agent(agent, prompt, node_dir, timeout=None, sandbox=None):
     pf.write_text(prompt, encoding="utf-8")
     of.unlink(missing_ok=True)
 
-    # relative keeps argv short and matches the agent's cwd; absolute if outside
-    rel = lambda p: (p.relative_to(WORK) if p.is_relative_to(WORK) else p).as_posix()
+    # Absolute, never relative to cwd: agy resolves a relative path against the
+    # directory it was handed in --add-dir, so it read no prompt, wrote out.md
+    # into the memory vault, and — having found no instructions — returned an
+    # invented PASS with rc=0. An agent that cannot find its prompt must fail,
+    # not improvise, and only an unambiguous path guarantees that.
     boot = (
-        f"Read the file {rel(pf)} and follow its instructions exactly. "
-        f"Write your complete final answer to {rel(of)} (overwrite it). "
+        f"Read the file {pf.as_posix()} and follow its instructions exactly. "
+        f"Write your complete final answer to {of.as_posix()} (overwrite it). "
         f"Do not ask clarifying questions; state assumptions instead."
     )
     # {mem} -> --add-dir the vault. Agents are sandboxed to the workspace, and

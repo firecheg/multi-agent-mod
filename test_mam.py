@@ -162,6 +162,43 @@ with tempfile.TemporaryDirectory() as td:
         assert "Not logged in" in str(e), "error must surface what the agent actually said"
 del mam.CFG["agents"]["_null"]
 
+# --- the agent must be told where its files are in absolute terms ----------
+# agy resolves a relative path against the directory handed to --add-dir, not
+# against cwd: it found no prompt, wrote out.md into the memory vault, and
+# returned an invented PASS with rc=0. The node dir here is INSIDE WORK, which
+# is exactly the case the old relative-path code got wrong.
+mam.CFG["agents"]["_null"] = {
+    "bin": [sys.executable], "args": ["-c", "print('x')", "{prompt}"], "install": "-"}
+_nd = mam.WORK / ".mam" / "_pathprobe"
+try:
+    try:
+        mam.run_agent("_null", "task", _nd)
+    except mam.AgentError:
+        pass  # no out.md, as expected — we only want the argv it was launched with
+    _boot = [a for a in json.loads((_nd / "meta.json").read_text(encoding="utf-8"))["argv"]
+             if "follow its instructions" in a][0]
+    assert (_nd / "prompt.md").as_posix() in _boot, _boot
+    assert (_nd / "out.md").as_posix() in _boot, _boot
+    # and the assertion above is only meaningful if relative would differ here
+    assert (_nd / "prompt.md").relative_to(mam.WORK).as_posix() != (_nd / "prompt.md").as_posix()
+finally:
+    shutil.rmtree(_nd, ignore_errors=True)
+    del mam.CFG["agents"]["_null"]
+
+# --- a note piped in on stdin must survive the round trip ------------------
+# Windows decodes stdin with the console code page, so UTF-8 bytes came back
+# as cp1251 and mem write stored a double-encoded note. Nothing failed; the
+# vault just filled with unreadable text.
+_body = "агент резолвит пути от --add-dir, а не от cwd"
+with tempfile.TemporaryDirectory() as td:
+    subprocess.run([sys.executable, str(mam.HOME / "mam.py"), "mem", "write",
+                    "--folder", "brain", "--name", "probe", "--description", "d",
+                    "--type", "gotcha", "--reach", "global"],
+                   input=_body.encode("utf-8"), cwd=str(mam.HOME), check=True,
+                   capture_output=True, env={**os.environ, "MAM_MEMORY": td})
+    _back = (pathlib.Path(td) / "brain" / "probe.md").read_text(encoding="utf-8")
+    assert _body in _back, f"stdin mangled on the way into the vault: {_back!r}"
+
 # --- a BOM in out.md must not ride into the next node's prompt -------------
 # codex writes one; under plain utf-8 it survived as ﻿, reached every
 # downstream prompt, and crashed any console that was not UTF-8.
