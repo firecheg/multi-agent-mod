@@ -101,13 +101,24 @@ project on the machine gets it.
 **Point the vault somewhere private before you use it in anger:**
 
 ```bash
-export MAM_MEMORY="$HOME/.mam-memory"     # setx MAM_MEMORY "%USERPROFILE%\.mam-memory"
+echo 'export MAM_MEMORY="$HOME/.mam-memory"' >> ~/.profile   # future shells
+export MAM_MEMORY="$HOME/.mam-memory"                        # this one
 ```
+
+```powershell
+setx MAM_MEMORY "$env:USERPROFILE\.mam-memory"      # future shells
+$env:MAM_MEMORY = "$env:USERPROFILE\.mam-memory"    # this one
+```
+
+Both lines, not just the persistent one: `setx` and `~/.profile` reach only
+processes started afterwards, so without the second line the shell you are
+standing in keeps writing to the clone. `doctor` tells you which vault is
+actually live — if it still says **bundled seed**, the export did not take.
 
 One vault serves every project, so notes written while you work on a private
 repo end up wherever the vault lives — and by default that is this clone, i.e.
 a public repo you might push. `MAM_MEMORY` moves it out. The bundled `memory/`
-stays as a seed you can copy from; `doctor` prints which vault is live.
+stays as a seed you can copy from.
 
 ### As a Claude Code skill
 

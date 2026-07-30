@@ -119,12 +119,11 @@ shutil.rmtree(_tmp)
 # from, so a note about a private project lands in a public one. MEM is bound
 # at import, so this has to be a fresh interpreter.
 import subprocess, sys
-_vault = tempfile.mkdtemp()
+_vault = str(pathlib.Path(tempfile.gettempdir(), "mam-vault-probe").resolve())
 _probe = subprocess.run([sys.executable, "-c", "import mam; print(mam.MEM)"],
                         cwd=str(mam.HOME), capture_output=True, text=True,
                         env={**os.environ, "MAM_MEMORY": _vault})
-assert _probe.stdout.strip() == str(pathlib.Path(_vault).resolve()), _probe.stdout + _probe.stderr
-shutil.rmtree(_vault)
+assert _probe.stdout.strip() == _vault, _probe.stdout + _probe.stderr
 
 # --- reviewer selection never returns the author --------------------------
 for author in mam.CFG["agents"]:
