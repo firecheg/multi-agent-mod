@@ -93,11 +93,21 @@ ahead of the bare name.
 
 ### One install, every repo
 
-`HOME` (the clone) holds config, graphs, and the single shared memory vault.
-`WORK` is wherever you ran the command — that is where agents actually operate,
-and run artifacts land in `WORK/.mam/`. Override with `MAM_WORKSPACE`. So you
-install once and every project on the machine gets it, while memory
-accumulates in one place.
+`HOME` (the clone) holds config and graphs. `WORK` is wherever you ran the
+command — that is where agents actually operate, and run artifacts land in
+`WORK/.mam/`. Override with `MAM_WORKSPACE`. So you install once and every
+project on the machine gets it.
+
+**Point the vault somewhere private before you use it in anger:**
+
+```bash
+export MAM_MEMORY="$HOME/.mam-memory"     # setx MAM_MEMORY "%USERPROFILE%\.mam-memory"
+```
+
+One vault serves every project, so notes written while you work on a private
+repo end up wherever the vault lives — and by default that is this clone, i.e.
+a public repo you might push. `MAM_MEMORY` moves it out. The bundled `memory/`
+stays as a seed you can copy from; `doctor` prints which vault is live.
 
 ### As a Claude Code skill
 
@@ -246,9 +256,14 @@ before launching a writing graph and don't touch the files until it returns.
 
 ## Memory
 
-An Obsidian-style vault in `memory/`: one fact per markdown file, YAML
-frontmatter, `[[wikilinks]]`, git-tracked, readable without any tooling.
-Schema in `memory/SCHEMA.md`.
+An Obsidian-style vault: one fact per markdown file, YAML frontmatter,
+`[[wikilinks]]`, git-tracked, readable without any tooling. Schema in
+`memory/SCHEMA.md`.
+
+The `memory/` in this repo is a **seed** — real notes from building the thing,
+kept because an empty vault teaches nothing about the format. Your own vault
+should live outside the clone (`MAM_MEMORY`, above), which keeps your notes out
+of a public repo and out of every `git pull` conflict.
 
 Every graph node gets the top-k relevant notes prepended automatically
 (`"memory": false` to opt out). Nodes marked `"remember": true` write durable

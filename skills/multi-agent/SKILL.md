@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.0.0
+  version: 1.1.0
 ---
 
 # /multi-agent
@@ -28,7 +28,7 @@ that writes. `doctor` (below) prints `harness <path>` as its first line —
 if that is not the clone the user meant, you found a stale one; stop and ask.
 
 Run every command **from the user's project directory**. The harness splits
-`HOME` (its own config, graphs, memory) from `WORK` (cwd — where agents
+`HOME` (its own config and graphs) from `WORK` (cwd — where agents
 actually operate), so one install serves every repo. Run artifacts land in
 `.mam/` in the project; suggest gitignoring it once.
 
@@ -154,6 +154,11 @@ echo "the fact" | python "$MAM" mem write --folder brain --name kebab-slug \
   --description "one line" --type gotcha --reach repo
 ```
 
+Notes go to the vault `doctor` printed. If that line says **bundled seed**, the
+user has no private vault and the note will be committed into the harness clone
+— say so before writing anything that names their project, and point them at
+`MAM_MEMORY`.
+
 `--reach repo` (default) stamps the current project and stays scoped to it;
 `--reach global` reaches every project. Reach is declared at write time and
 never widened at read time. Link neighbours with `[[other-note]]` — retrieval
@@ -174,6 +179,8 @@ Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.1.0** — the memory vault can live outside the clone (`MAM_MEMORY`);
+  `doctor` prints which vault is live.
 - **1.0.0** — first public release. Routing table, the no-self-review rule,
   `doctor` / `ask` / `review` / `graph` / `mem`, harness discovery via
   `$MAM_HOME`.

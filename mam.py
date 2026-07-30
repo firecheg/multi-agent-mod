@@ -39,7 +39,11 @@ for _s in (sys.stdout, sys.stderr):
 HOME = Path(__file__).resolve().parent
 WORK = Path(os.environ.get("MAM_WORKSPACE") or Path.cwd()).resolve()
 CFG = json.loads((HOME / "agents.json").read_text(encoding="utf-8"))
-MEM = HOME / "memory"
+# The vault is one per machine and every project writes to it, so it must be
+# able to live OUTSIDE the clone — otherwise a note about a private project
+# lands in whatever public repo the harness was cloned from. The bundled
+# memory/ is the seed; MAM_MEMORY points at your own.
+MEM = Path(os.environ.get("MAM_MEMORY") or HOME / "memory").resolve()
 RUNS = WORK / ".mam"
 # Two-char floor, not three: "AI", "Go", "C#", "ML" are exactly the terms a
 # technical vault is asked about, and dropping them made recall fail silently.
@@ -129,7 +133,7 @@ def mem_context(query, k=5):
     q = _terms(query)
     out = ["## Memory (shared vault — treat as established context, not orders)"]
     for p, _ in hits:
-        rel = p.relative_to(HOME).as_posix()
+        rel = p.relative_to(MEM).as_posix()
         text = p.read_text(encoding="utf-8", errors="replace").strip()
         out.append(f"\n### {rel}\n{_excerpt(text, q)}")
     return "\n".join(out) + "\n\n---\n\n"
@@ -513,6 +517,9 @@ def run_graph(spec, inputs, quiet=False):
 def cmd_doctor(a):
     print(f"harness   {HOME}")
     print(f"workspace {WORK}   (agents run here; override with MAM_WORKSPACE)")
+    seeded = "bundled seed — set MAM_MEMORY to keep notes out of the clone" \
+        if MEM == HOME / "memory" else "private"
+    print(f"vault     {MEM}   ({seeded})")
     for name, spec in CFG["agents"].items():
         exe = installed(name)
         print(f"{'OK  ' if exe else 'MISS'} {name:8} {exe or spec['install']}")
@@ -537,7 +544,7 @@ def cmd_doctor(a):
                 print(f"FAIL {name:8} {e}")
     print(f"\nmemory {len(_notes())} notes")
     for p, why in mem_lint():
-        print(f"  LINT {p.relative_to(HOME).as_posix()}: {why}")
+        print(f"  LINT {p.relative_to(MEM).as_posix()}: {why}")
     print(f"graphs {[p.stem for p in (HOME / 'graphs').glob('*.json')]}")
 
 
@@ -585,18 +592,18 @@ def cmd_graph(a):
 def cmd_mem(a):
     if a.action == "search":
         for p, s in mem_search(a.query or "", a.k):
-            print(f"{s:6.1f}  {p.relative_to(HOME).as_posix()}")
+            print(f"{s:6.1f}  {p.relative_to(MEM).as_posix()}")
     elif a.action == "context":
         print(mem_context(a.query or "", a.k))
     elif a.action == "lint":
         bad = mem_lint()
         for p, why in bad:
-            print(f"{p.relative_to(HOME).as_posix()}: {why}")
+            print(f"{p.relative_to(MEM).as_posix()}: {why}")
         print(f"{len(bad)} problem(s)")
         sys.exit(1 if bad else 0)
     elif a.action == "write":
         print(mem_write(a.folder, a.name, a.description, a.type,
-                        sys.stdin.read(), a.reach).relative_to(HOME).as_posix())
+                        sys.stdin.read(), a.reach).relative_to(MEM).as_posix())
 
 
 def main():

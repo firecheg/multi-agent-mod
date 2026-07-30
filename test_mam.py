@@ -3,6 +3,12 @@ memory retrieval, verdict parsing, and graph scheduling. No real agents called.
 
     python test_mam.py
 """
+import os, pathlib
+# Pin the suite to the bundled seed vault: the memory assertions name real
+# notes, and a machine with MAM_MEMORY pointing at a private (or empty) vault
+# would fail them for reasons that have nothing to do with the code.
+os.environ["MAM_MEMORY"] = str(pathlib.Path(__file__).resolve().parent / "memory")
+
 import mam
 
 # --- no self-review, statically -------------------------------------------
@@ -107,6 +113,18 @@ finally:
     os.path.getmtime = _getmtime
 assert os.path.getmtime is _getmtime, "monkeypatch leaked into later tests"
 shutil.rmtree(_tmp)
+
+# --- the vault can live outside the clone ---------------------------------
+# Without this the harness writes every note into whatever repo it was cloned
+# from, so a note about a private project lands in a public one. MEM is bound
+# at import, so this has to be a fresh interpreter.
+import subprocess, sys
+_vault = tempfile.mkdtemp()
+_probe = subprocess.run([sys.executable, "-c", "import mam; print(mam.MEM)"],
+                        cwd=str(mam.HOME), capture_output=True, text=True,
+                        env={**os.environ, "MAM_MEMORY": _vault})
+assert _probe.stdout.strip() == str(pathlib.Path(_vault).resolve()), _probe.stdout + _probe.stderr
+shutil.rmtree(_vault)
 
 # --- reviewer selection never returns the author --------------------------
 for author in mam.CFG["agents"]:
