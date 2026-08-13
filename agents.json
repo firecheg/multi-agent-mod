@@ -21,7 +21,8 @@
       ],
       "args": [
         "exec",
-        "--full-auto",
+        "--sandbox",
+        "workspace-write",
         "--skip-git-repo-check",
         "--add-dir",
         "{mem}",
@@ -29,7 +30,7 @@
       ],
       "role": "implementation, refactors, precise diffs, tests, sandboxed execution",
       "install": "npm i -g @openai/codex",
-      "note": "--full-auto = workspace-write sandbox, NO network. Add sandbox:danger-full-access per-node if net is needed."
+      "note": "workspace-write = writes the workspace, NO network. Add sandbox:danger-full-access per-node if net is needed (e.g. tests that hit a DB on localhost). Was --full-auto until codex 0.147 removed that flag from `exec`; --sandbox is the spelling that survives."
     },
     "agy": {
       "bin": [
