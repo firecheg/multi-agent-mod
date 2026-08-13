@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.1.0
+  version: 1.2.0
 ---
 
 # /multi-agent
@@ -179,6 +179,10 @@ Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.2.0** — codex is invoked with `--sandbox workspace-write` instead of
+  `--full-auto`, which codex 0.147 removed from `exec` (every build node died
+  with rc=2 before reaching the model). A per-node `sandbox` now replaces that
+  flag rather than appending a second one.
 - **1.1.0** — the memory vault can live outside the clone (`MAM_MEMORY`);
   `doctor` prints which vault is live.
 - **1.0.0** — first public release. Routing table, the no-self-review rule,

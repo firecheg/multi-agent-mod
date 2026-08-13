@@ -241,6 +241,28 @@ def pick_reviewer(author, exclude=()):
     raise AgentError(f"no installed cross-reviewer for {author!r} (author is never eligible)")
 
 
+def apply_sandbox(args, mode):
+    """Replace whatever sandbox the config asked for with `mode`, exactly once.
+
+    Appending blindly is not enough: with `--sandbox` already in the configured
+    args, codex gets the flag twice and clap rejects the whole invocation. The
+    legacy `--full-auto` spelling is dropped here too, so a config that predates
+    codex 0.147 (which removed it from `exec`) still runs.
+    """
+    out, drop_value = [], False
+    for a in args:
+        if drop_value:
+            drop_value = False
+            continue
+        if a in ("--sandbox", "-s"):
+            drop_value = True
+            continue
+        if a == "--full-auto":
+            continue
+        out.append(a)
+    return out + ["--sandbox", mode]
+
+
 def run_agent(agent, prompt, node_dir, timeout=None, sandbox=None):
     """Write prompt to a file, tell the agent to read it and answer into out.md."""
     exe, spec = resolve(agent)
@@ -265,7 +287,7 @@ def run_agent(agent, prompt, node_dir, timeout=None, sandbox=None):
     args = [a.replace("{prompt}", boot).replace("{mem}", MEM.as_posix())
             for a in spec["args"]]
     if sandbox and agent == "codex":
-        args = [a for a in args if a != "--full-auto"] + ["--sandbox", sandbox]
+        args = apply_sandbox(args, sandbox)
 
     t0 = time.time()
     proc = subprocess.run(

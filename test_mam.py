@@ -329,4 +329,21 @@ assert res["b"] == "b", "an unrelated branch must still run"
 shutil.rmtree(run_dir)
 mam.run_node = _real_run_node
 
+# --- per-node sandbox must yield exactly one --sandbox --------------------
+# Regression: codex 0.147 dropped --full-auto from `exec`, so every build node
+# died with rc=2 before a single model call. The flag now lives in agents.json
+# as `--sandbox workspace-write`, which a per-node override has to REPLACE —
+# appending a second --sandbox makes clap reject the invocation outright.
+argv = mam.apply_sandbox(
+    ["exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "prompt"],
+    "danger-full-access")
+assert argv.count("--sandbox") == 1, argv
+assert argv[-2:] == ["--sandbox", "danger-full-access"], argv
+assert "workspace-write" not in argv, argv
+assert argv[:2] == ["exec", "--skip-git-repo-check"], f"unrelated args dropped: {argv}"
+# a config still carrying the removed flag must not resurrect it
+assert "--full-auto" not in mam.apply_sandbox(["exec", "--full-auto"], "read-only")
+# and the shipped config must actually be runnable by current codex
+assert "--full-auto" not in mam.CFG["agents"]["codex"]["args"], "codex exec rejects --full-auto"
+
 print("ok")
