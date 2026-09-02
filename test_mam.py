@@ -346,4 +346,19 @@ assert "--full-auto" not in mam.apply_sandbox(["exec", "--full-auto"], "read-onl
 # and the shipped config must actually be runnable by current codex
 assert "--full-auto" not in mam.CFG["agents"]["codex"]["args"], "codex exec rejects --full-auto"
 
+# --- `review` refuses to run without criteria ------------------------------
+# Regression: a review launched with only --task returned {"pass": true,
+# "issues": []} on an 876-line diff. The reviewer was not lazy -- it checks the
+# criteria and nothing else, and there were none, so the gate was vacuous. The
+# old code substituted "Correct, minimal, no obvious bugs." and made that
+# invisible. Refuse instead: the parser is the only place this can be enforced
+# before a model call is paid for.
+_p = subprocess.run([sys.executable, "mam.py", "review", "claude", "--task", "t"],
+                    cwd=str(mam.HOME), capture_output=True, text=True,
+                    encoding="utf-8", errors="replace")
+assert _p.returncode == 2, f"review ran without criteria: rc={_p.returncode}"
+assert "--criteria" in _p.stderr, _p.stderr
+# and it fails at parse time, before picking a reviewer or reading the diff
+assert "reviewed by" not in _p.stderr, "a model call was reached anyway"
+
 print("ok")
