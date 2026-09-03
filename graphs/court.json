@@ -1,8 +1,14 @@
 {
   "name": "court",
-  "_": "The author defends its own work. Who plays which part is not configured, it follows from what each agent did: the judge is whoever wrote the brief, the defence is whoever wrote the code, and the prosecutor is the one who did neither — which is why prosecutor must resolve to a third agent, and `distinct` enforces it. The charge is filed once; after that the loop is judge and author, because the judge is the one holding the brief the work is measured against. It ends when the judge is satisfied or the rounds run out, and running out is a node failure rather than a pass.",
+  "_": "The author defends its own work. Who plays which part is not configured, it follows from what each agent did: the judge is whoever wrote the brief, the defence is whoever wrote the code, and the prosecutor is the one who did neither — which is why prosecutor must resolve to a third agent, and `distinct` enforces it. The indictment is re-run after every fix, because the prosecutor holds the verify loop: a remedy that breaks something else is caught by the same adversary that filed the original charge, in the same round. The judge rules last, on the brief. Running out of rounds is a node failure, not a pass.",
   "concurrency": 1,
-  "distinct": [["spec", "implement", "prosecutor"]],
+  "distinct": [
+    [
+      "spec",
+      "implement",
+      "prosecutor"
+    ]
+  ],
   "nodes": [
     {
       "id": "brief",
@@ -12,38 +18,55 @@
     {
       "id": "build",
       "agent": "implement",
-      "needs": ["brief"],
+      "needs": [
+        "brief"
+      ],
       "prompt": "Implement this spec in the repo. Then report what you changed, file by file.\n\nSPEC:\n{brief}\n\nOriginal task for context:\n{input}"
     },
     {
       "id": "charge",
       "agent": "prosecutor",
-      "needs": ["build"],
+      "needs": [
+        "build"
+      ],
       "review_of": "build",
       "prompt": "You are the PROSECUTOR. You wrote neither this brief nor this code.\n\nBRIEF:\n{brief}\n\nAUTHOR'S REPORT:\n{build}\n\nRead the actual files on disk — do not trust the report. Charge only what you can point at: acceptance criteria the code does not meet, correctness bugs, unhandled inputs, races, security issues, tests that would pass against a broken implementation, conventions of the surrounding code that this breaks.\n\nNumber every charge. For each: file:line, what is wrong, the input or situation that exposes it, how serious. One defect per charge — a charge that bundles three cannot be ruled on.\n\nDo not manufacture charges. An empty indictment is a valid outcome; a padded one wastes everyone's round."
     },
     {
       "id": "defence",
       "agent": "implement",
-      "needs": ["charge"],
+      "needs": [
+        "charge"
+      ],
       "prompt": "You are the DEFENCE, and you wrote this code. Answer the indictment — **make no edits to any file**, this round is argument only.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nTake the charges in order and answer every one with exactly one of:\n\n- VALID — the defect is real. Say so plainly, and add anything the prosecutor missed about its blast radius.\n- NOT A DEFECT — with the reason: the path is unreachable, the input is validated upstream, the convention it names is not the convention here, the prosecutor misread the control flow. Point at the evidence.\n- OUT OF SCOPE — real, but pre-existing or outside what the brief asked for. Say which.\n\nConceding a charge is not losing. A defence that fights every point tells the judge nothing, and you are about to be asked to fix whatever is upheld."
     },
     {
       "id": "settle",
       "agent": "implement",
-      "needs": ["defence"],
+      "needs": [
+        "defence"
+      ],
       "remember": true,
       "verify": {
-        "by": "spec",
+        "by": "prosecutor",
         "max_rounds": 3,
         "criteria": [
           "Every charge the defence conceded as VALID is fixed in the code on disk",
-          "Every acceptance criterion in the brief is met by the code, including any the indictment never raised",
+          "The fix introduced no new defect of the kind this indictment names — re-read the changed files, do not assume the remedy was clean",
           "Nothing argued down as NOT A DEFECT was changed anyway",
           "The change stayed inside the brief — no unrelated edits rode along"
         ]
       },
-      "prompt": "Fix what you conceded, and only that.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nYOUR DEFENCE:\n{defence}\n\nWork through the charges you answered VALID. Leave the ones you argued down alone — they were settled by argument, and re-litigating them with an edit wastes that. OUT OF SCOPE ones are somebody's later task.\n\nThen report, charge by charge, what you changed and where. The judge holds the brief and will rule on this; if it is not satisfied you will get its objections back and another round, so answer them rather than restating the report."
+      "prompt": "Fix what you conceded, and only that.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nYOUR DEFENCE:\n{defence}\n\nWork through the charges you answered VALID. Leave the ones you argued down alone — they were settled by argument, and re-litigating them with an edit wastes that. OUT OF SCOPE ones are somebody's later task.\n\nThen report, charge by charge, what you changed and where. The prosecutor reads the result and gets to charge again — including anything your fix broke. Its objections come back to you as another round, so answer them rather than restating the report. When it has nothing left, the judge rules on the brief."
+    },
+    {
+      "id": "ruling",
+      "agent": "spec",
+      "needs": [
+        "settle"
+      ],
+      "review_of": "settle",
+      "prompt": "You are the JUDGE, and you wrote the brief this work is measured against. You wrote neither the code nor the indictment.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nDEFENCE:\n{defence}\n\nWHAT THE AUTHOR SETTLED:\n{settle}\n\nThe prosecutor has already re-examined the result and stopped charging. Read the code yourself; a prosecutor running out of objections is evidence about the indictment, not a verdict on the brief.\n\nRule on each charge by number: UPHELD AND FIXED / DISMISSED (say which argument settled it) / NOTED (real, out of scope). Then answer the only question that is yours alone: does this meet the acceptance criteria you wrote? Name any criterion the whole exchange never touched — neither side is measured against a brief they did not write.\n\nFinish with: ships as-is, or the specific work left. Attribute each defect to the author that caused it — one that came from your own brief is yours."
     }
   ]
 }
