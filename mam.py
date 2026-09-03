@@ -40,7 +40,43 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
 
 HOME = Path(__file__).resolve().parent
 WORK = Path(os.environ.get("MAM_WORKSPACE") or Path.cwd()).resolve()
-CFG = json.loads((HOME / "agents.json").read_text(encoding="utf-8"))
+AGENTS_LOCAL = Path(os.environ.get("MAM_AGENTS_LOCAL") or HOME / "agents.local.json")
+
+
+def load_agents():
+    """agents.json, with agents.local.json layered on top.
+
+    The tracked file is the shared default: what the agents are and how each is
+    invoked. Anything that is true of one machine — a binary in an unusual
+    place, an extra model you pay for, a longer timeout — belongs in the local
+    file, which is untracked. Without that split the only way to add an agent is
+    to modify a tracked file, and every `git pull` becomes a conflict.
+
+    Merging is one level deep per section: a local agent entry replaces the
+    fields it names and keeps the rest, so overriding `bin` does not cost you
+    the args and the note.
+    """
+    cfg = json.loads((HOME / "agents.json").read_text(encoding="utf-8"))
+    if not AGENTS_LOCAL.exists():
+        return cfg
+    local = json.loads(AGENTS_LOCAL.read_text(encoding="utf-8"))
+    for section in ("agents", "reviewers"):
+        for key, value in (local.pop(section, None) or {}).items():
+            if section == "agents" and key in cfg["agents"] and isinstance(value, dict):
+                cfg["agents"][key] = {**cfg["agents"][key], **value}
+            else:
+                cfg[section][key] = value
+    cfg.update(local)
+    # An agent nobody may review cannot be an author, and the failure surfaces
+    # only mid-run as "no installed cross-reviewer". Catch it at load.
+    for name in cfg["agents"]:
+        cfg["reviewers"].setdefault(name, [n for n in cfg["agents"] if n != name])
+        if name in cfg["reviewers"][name]:
+            raise ValueError(f"{AGENTS_LOCAL.name}: {name!r} lists itself as its own reviewer")
+    return cfg
+
+
+CFG = load_agents()
 # The vault is one per machine and every project writes to it, so it must be
 # able to live OUTSIDE the clone — otherwise a note about a private project
 # lands in whatever public repo the harness was cloned from. The bundled
@@ -608,6 +644,8 @@ def cmd_doctor(a):
         print("roles     " + ", ".join(f"{r}={g}" for r, g in _roles.items()))
     else:
         print("roles     (none)  " + COLD_START.splitlines()[0])
+    if AGENTS_LOCAL.exists():
+        print(f"agents    agents.json + {AGENTS_LOCAL.name}")
     print(f"vault     {MEM}" + ("   (bundled seed — set MAM_MEMORY to keep notes"
                                 " out of the clone)" if MEM == HOME / "memory" else ""))
     for name, spec in CFG["agents"].items():

@@ -1,0 +1,25 @@
+{
+  "_": "Copy to agents.local.json (untracked) for anything true of THIS machine only. Merged over agents.json one level deep per agent, so naming `bin` keeps the args and the note. Delete what you do not need.",
+
+  "agents": {
+    "codex": {
+      "bin": ["/opt/homebrew/bin/codex", "codex"]
+    },
+
+    "agy-flash": {
+      "bin": ["~/AppData/Local/agy/bin/agy.exe", "agy"],
+      "args": ["-p", "{prompt}", "--dangerously-skip-permissions", "--sandbox",
+               "--add-dir", "{mem}", "--print-timeout", "30m",
+               "--model", "gemini-3.8-flash-high"],
+      "role": "implementation on a settled spec: mechanical edits, assets, routine refactors",
+      "install": "irm https://antigravity.google/cli/install.ps1 | iex   (then run `agy` once to log in)",
+      "note": "Cheap and fast; worth pairing with two reviewers rather than one — see graphs/build-2r.json"
+    }
+  },
+
+  "reviewers": {
+    "agy-flash": ["claude", "codex", "agy"]
+  },
+
+  "timeout": 7200
+}

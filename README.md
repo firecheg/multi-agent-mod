@@ -255,6 +255,20 @@ or tells you it is missing.
 The table above is a recommendation, not a default — put your own agents where
 they are strongest.
 
+Anything true of **your machine** rather than of this repo — a binary in an
+unusual place, an extra model you pay for, a longer timeout — goes in
+`agents.local.json`, layered over `agents.json`:
+
+```bash
+cp agents.local.json.example agents.local.json
+```
+
+The merge is one level deep per agent, so naming `bin` keeps that agent's args
+and note. New agents can be added outright; they get reviewers assigned if you
+do not name any, and an agent listed as its own reviewer is rejected at load.
+The file is untracked, which is the point: editing the tracked `agents.json`
+turns every `git pull` into a conflict, and it is the upgrade path.
+
 A node is JSON:
 
 ```json

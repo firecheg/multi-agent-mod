@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.5.0
+  version: 1.6.0
 ---
 
 # /multi-agent
@@ -89,6 +89,14 @@ both is rejected once bound.
 Re-run `init` any time to change one role; it merges rather than replaces.
 Roles live in `roles.json` next to the harness (untracked, `MAM_ROLES`
 overrides), so they never travel with the repo.
+
+If the user wants a role filled by something the roster does not list — a
+binary somewhere unusual, an extra model they pay for — that goes in
+`agents.local.json` (untracked, copy `agents.local.json.example`), layered over
+`agents.json` one level deep per agent. Never edit the tracked `agents.json`
+for it: that is their clone's upgrade path, and a local entry survives
+`git pull` where an edit becomes a conflict. `doctor` says when the local file
+is in play.
 
 ## Routing
 
@@ -227,6 +235,8 @@ Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.6.0** — `agents.local.json` holds what is true of one machine (binary
+  paths, extra models); the tracked roster stays pullable.
 - **1.5.0** — graphs name roles, not agents, and `init` binds them to whatever
   the user has. Ask before assuming a roster. Adds `graph build-2r`.
 - **1.4.0** — a graph node's `verify` block must list `criteria`; the spec is
