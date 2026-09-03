@@ -248,7 +248,10 @@ A node is JSON:
 
 `{node_id}` interpolates that node's output, `{input}` the CLI argument. Nodes
 whose deps are satisfied run in parallel. `verify` is the loop (retry with the
-verifier's issues appended); `needs` is the graph.
+verifier's issues appended); `needs` is the graph. A `verify` block has to list
+`criteria` — the verifier checks those and nothing else, so a gate without them
+passes anything while still costing a call per round. Omit `verify` entirely to
+run a node ungated.
 
 Every `{placeholder}` must resolve to an input or to a node the referencing
 node actually waits on — validation rejects anything else. An unresolved one

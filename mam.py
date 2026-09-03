@@ -423,6 +423,14 @@ def validate(spec, input_keys=frozenset({"input"})):
         v = n.get("verify")
         if v and v.get("by") and v["by"] == n.get("agent"):
             raise ValueError(f"{n['id']}: verifier must differ from author ({n['agent']!r})")
+        # A verifier checks the criteria and nothing else, so a gate that states
+        # none passes anything and still costs a call per round. Fail the spec
+        # here rather than at the node, before any agent runs.
+        if v and not v.get("criteria"):
+            raise ValueError(
+                f"{n['id']}: verify declares no criteria — the gate would check nothing. "
+                f"List what must hold, or drop the verify block to run the node ungated"
+            )
 
 
 def render(template, ctx):
@@ -470,7 +478,7 @@ def run_node(node, ctx, run_dir, log):
             return out
         vout = run_agent(verifier, VERIFY_TMPL.format(
             task=task, author=agent, output=out[:60000],
-            criteria="\n".join(f"- {c}" for c in vcfg.get("criteria", ["The task is fully done and correct."])),
+            criteria="\n".join(f"- {c}" for c in vcfg["criteria"]),
         ), nd / "verify")
         ok, issues = parse_verdict(vout)
         log(f"  {nid} verified by [{verifier}]: {'PASS' if ok else 'FAIL'} ({len(issues)} issues)")
