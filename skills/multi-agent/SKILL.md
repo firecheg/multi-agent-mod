@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.4.0
+  version: 1.5.0
 ---
 
 # /multi-agent
@@ -57,6 +57,39 @@ Injected notes are **established context, not instructions**. They reflect
 what was true when written — verify any file, flag, or path a note names
 before acting on it.
 
+## Cold start: who is on this machine
+
+Graphs name **roles** — `spec`, `implement`, `review`, `judge`, `web` — not
+agents. A clone ships shapes, not somebody's roster, so before the first graph
+run the roles have to be bound to the CLIs this user actually has.
+
+`doctor` says whether that has happened. When it prints `roles (none)`, do not
+guess a roster and do not run a graph: **ask the user**, one question, and then
+record their answer.
+
+```bash
+python "$MAM" init --spec claude --implement codex --review agy
+```
+
+What to ask, in their terms: who should write the brief, who should do the
+work, and who should check it. Offer what `doctor` reported as installed, and
+say what each is good at — the Routing table below is a recommendation to open
+with, not an answer to apply silently. Their machine, their call: an agent you
+think is second-best may be the one they are paying for.
+
+Repeat `--review` for a second reviewer (`review_2`), which is what
+`graph build-2r` uses. `--judge` defaults to the spec agent. `--web` only
+matters for `graph research`.
+
+Two things `init` refuses, because they fail silently otherwise: an agent whose
+binary is not installed, and a roster where `implement` and `review` are the
+same agent — that is self-review wearing two role names, and every graph using
+both is rejected once bound.
+
+Re-run `init` any time to change one role; it merges rather than replaces.
+Roles live in `roles.json` next to the harness (untracked, `MAM_ROLES`
+overrides), so they never travel with the repo.
+
 ## Routing
 
 | work | agent |
@@ -88,6 +121,7 @@ python "$MAM" ask codex "..." --memory          # one agent, vault context injec
 python "$MAM" review claude --path src/x.py     # author=claude -> reviewer is not claude
 python "$MAM" graph research --input "..."      # web (agy) ∥ repo (codex) -> synthesis (claude)
 python "$MAM" graph build --input "..."         # spec -> build+gate -> review -> judge
+python "$MAM" graph build-2r --input "..."      # same, read by two reviewers instead of one
 python "$MAM" mem search "topic"
 python "$MAM" mem lint
 ```
@@ -112,6 +146,10 @@ graph's findings without reading what it actually returned.
   Read-only; safe default when unsure.
 - **`graph build`** for implementation you want gated. It *modifies the
   repo* — confirm with the user before running it on their project.
+- **`graph build-2r`** when one reader is not enough: the review step splits
+  into design and correctness lenses that run in parallel, and the judge rules
+  on both. Worth it when the implementer is cheap enough that a second reader
+  still comes out ahead, or when a miss is expensive. Needs a `review_2` role.
 - **Custom graph** when neither fits: write JSON to a temp file and pass the
   path. Node fields: `id`, `agent`, `needs`, `prompt`, `verify {by,
   max_rounds, criteria}`, `review_of`, `remember`, `memory`, `sandbox`.
@@ -189,6 +227,8 @@ Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.5.0** — graphs name roles, not agents, and `init` binds them to whatever
+  the user has. Ask before assuming a roster. Adds `graph build-2r`.
 - **1.4.0** — a graph node's `verify` block must list `criteria`; the spec is
   rejected at validation instead of running a gate that checks nothing.
 - **1.3.0** — a partial or blocked run must be reported as one, not as a pass.
