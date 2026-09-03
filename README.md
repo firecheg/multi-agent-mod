@@ -244,6 +244,11 @@ Graphs name **roles**, not agents — `spec`, `implement`, `review`, `judge`,
 python mam.py init --spec claude --implement codex --review agy
 ```
 
+Repeat a flag for a preference order, best first — `--implement agy --implement
+codex` falls through to codex when agy is not installed, so a rate limit or a
+logout costs a fallback instead of a failed run. `--role NAME=a,b` sets any role
+your own graphs name.
+
 `init` refuses an agent whose binary is missing, and warns when `implement` and
 `review` land on the same agent — that is self-review with two labels, and any
 graph using both is rejected once bound. Repeat `--review` for a second

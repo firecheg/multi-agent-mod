@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.6.0
+  version: 1.7.0
 ---
 
 # /multi-agent
@@ -71,15 +71,26 @@ record their answer.
 python "$MAM" init --spec claude --implement codex --review agy
 ```
 
+Repeat a flag to give that role a **preference order**, best first — the first
+agent whose binary is there wins at run time:
+
+```bash
+python "$MAM" init --implement agy --implement codex --implement claude
+```
+
+Ask for it. An agent that hits a rate limit or logs out should cost the user a
+fallback, not a failed run, and they are the one who knows which second choice
+they would accept. `--role NAME=a,b` sets any role beyond the built-in ones.
+
 What to ask, in their terms: who should write the brief, who should do the
 work, and who should check it. Offer what `doctor` reported as installed, and
 say what each is good at — the Routing table below is a recommendation to open
 with, not an answer to apply silently. Their machine, their call: an agent you
 think is second-best may be the one they are paying for.
 
-Repeat `--review` for a second reviewer (`review_2`), which is what
-`graph build-2r` uses. `--judge` defaults to the spec agent. `--web` only
-matters for `graph research`.
+`--review-2` sets the second, independent reviewer that `graph build-2r` uses —
+a different role, not a fallback for the first. `--judge` defaults to the spec
+agent. `--web` only matters for `graph research`.
 
 Two things `init` refuses, because they fail silently otherwise: an agent whose
 binary is not installed, and a roster where `implement` and `review` are the
@@ -235,6 +246,9 @@ Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.7.0** — a role takes a preference order, not one agent; the first
+  installed one wins. `--review-2` is now its own flag, and `--role NAME=a,b`
+  sets roles beyond the built-in ones.
 - **1.6.0** — `agents.local.json` holds what is true of one machine (binary
   paths, extra models); the tracked roster stays pullable.
 - **1.5.0** — graphs name roles, not agents, and `init` binds them to whatever

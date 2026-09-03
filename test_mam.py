@@ -134,6 +134,37 @@ finally:
     mam.AGENTS_LOCAL, mam.CFG = _orig_local, _orig_cfg
     shutil.rmtree(_d, ignore_errors=True)
 
+# --- a role is a chain, and the first INSTALLED agent wins ------------------
+# Agents go missing for reasons a config cannot see: rate limits, a logout, an
+# uninstall. Naming a preference order costs a fallback instead of a failed run.
+_chain = {"name": "t", "nodes": [
+    {"id": "a", "agent": "implement", "prompt": "x"},
+    {"id": "b", "agent": "review", "needs": ["a"], "review_of": "a", "prompt": "y"},
+]}
+_real_installed = mam.installed
+try:
+    mam.installed = lambda n: n != "agy"
+    _b = mam.bind_roles(_chain, {"implement": ["agy", "codex"], "review": "claude"})
+    assert _b["nodes"][0]["agent"] == "codex", "a missing first choice must fall through"
+
+    mam.installed = lambda n: True
+    _b = mam.bind_roles(_chain, {"implement": ["agy", "codex"], "review": "claude"})
+    assert _b["nodes"][0]["agent"] == "agy", "the first choice wins when it is there"
+
+    # a bare string is still a chain of one -- rosters written before chains
+    # existed keep working
+    _b = mam.bind_roles(_chain, {"implement": "codex", "review": "claude"})
+    assert _b["nodes"][0]["agent"] == "codex", _b
+
+    mam.installed = lambda n: False
+    try:
+        mam.bind_roles(_chain, {"implement": ["agy", "codex"], "review": "claude"})
+        raise SystemExit("FAIL: bound a role whose whole chain is uninstalled")
+    except ValueError as e:
+        assert "none of them installed" in str(e), e
+finally:
+    mam.installed = _real_installed
+
 # --- graph structure ------------------------------------------------------
 for bad, why in [
     ({"name": "t", "nodes": [{"id": "a", "agent": "codex", "needs": ["ghost"], "prompt": "x"}]}, "unknown dep"),
