@@ -234,15 +234,18 @@ and the judge rules on both. Needs a `review_2` role. Worth it when the
 implementer is cheap enough that a second reader still comes out ahead, or when
 a miss is expensive.
 
-`graphs/court.json` — brief → build → indictment → defence → fix ↔ re-indictment
-→ ruling. The parts
+`graphs/court.json` — brief → build → indictment → defence → ruling → fix ↔
+re-indictment. The parts
 are not assigned: the judge is whoever wrote the brief, the defence is whoever
 wrote the code, and the prosecutor is the one who did neither, so it needs three
 agents and refuses to run when two of the roles land on one. The author answers
-every charge in writing before touching anything, and only what it concedes gets
-fixed; the prosecutor then re-reads the result and charges again, including
-anything the remedy broke, until it has nothing left. Only then does the judge
-hold the brief against what survived. A finding has to survive a reply
+every charge in writing before touching anything, and the judge then rules
+between the two — nothing has been edited yet, so a charge it dismisses costs
+nobody a rewrite, and "that is what I specified" is an answer the author does
+not pay for. The judge is a second reviewer as much as an arbiter: holding the
+brief, it is the only party that can name an acceptance criterion neither side
+raised, and it adds that to the work order. The author then fixes the order, and
+the prosecutor charges again each round, including anything the remedy broke. A finding has to survive a reply
 before it costs an edit — a review that goes straight to a rewrite never finds
 out it was wrong.
 

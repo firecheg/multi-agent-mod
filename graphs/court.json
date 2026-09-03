@@ -1,6 +1,6 @@
 {
   "name": "court",
-  "_": "The author defends its own work. Who plays which part is not configured, it follows from what each agent did: the judge is whoever wrote the brief, the defence is whoever wrote the code, and the prosecutor is the one who did neither — which is why prosecutor must resolve to a third agent, and `distinct` enforces it. The indictment is re-run after every fix, because the prosecutor holds the verify loop: a remedy that breaks something else is caught by the same adversary that filed the original charge, in the same round. The judge rules last, on the brief. Running out of rounds is a node failure, not a pass.",
+  "_": "The author defends its own work, and nothing is edited until the dispute is settled. Parts are not configured, they follow from what each agent did: the judge wrote the brief, the defence wrote the code, the prosecutor did neither — hence `distinct`. The judge rules between the charge and the fix, not after it, because 'that is what I asked for' arrives too late once the author has already rewritten the thing. It is also a second reviewer in its own right: it holds the brief, so it is the only party that can name a criterion neither side raised. After the ruling the author fixes what was upheld, and the prosecutor re-charges each round — including anything the remedy broke. Rounds running out is a node failure, not a pass.",
   "concurrency": 1,
   "distinct": [
     [
@@ -41,32 +41,33 @@
       "prompt": "You are the DEFENCE, and you wrote this code. Answer the indictment — **make no edits to any file**, this round is argument only.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nTake the charges in order and answer every one with exactly one of:\n\n- VALID — the defect is real. Say so plainly, and add anything the prosecutor missed about its blast radius.\n- NOT A DEFECT — with the reason: the path is unreachable, the input is validated upstream, the convention it names is not the convention here, the prosecutor misread the control flow. Point at the evidence.\n- OUT OF SCOPE — real, but pre-existing or outside what the brief asked for. Say which.\n\nConceding a charge is not losing. A defence that fights every point tells the judge nothing, and you are about to be asked to fix whatever is upheld."
     },
     {
+      "id": "ruling",
+      "agent": "spec",
+      "needs": [
+        "charge",
+        "defence"
+      ],
+      "review_of": "build",
+      "prompt": "You are the JUDGE. You wrote the brief this work is measured against; you wrote neither the code nor the indictment, and you are also the second reader of the code itself.\n\nBRIEF:\n{brief}\n\nAUTHOR'S REPORT:\n{build}\n\nINDICTMENT:\n{charge}\n\nDEFENCE:\n{defence}\n\nNothing has been edited yet. What you uphold is what gets fixed, and what you dismiss stays as it is — so read the code yourself rather than scoring the argument.\n\nRule on each charge by number:\n\n- UPHELD — the defect is real and in scope. This becomes the work order.\n- DISMISSED — the defence is right, or the brief asked for exactly this. Say which, and say it plainly when the answer is 'that is what I specified': the prosecutor is reading your brief for the first time and the author should not pay for that.\n- NOTED — real, but outside what the brief asked for. Log it, do not order it.\n\nThen add what neither side raised. You are the only party holding the brief: name any acceptance criterion the code does not meet and the indictment never mentioned, and add it to the work order as your own charge. Attribute defects honestly — one that came from your brief is yours, not the author's.\n\nFinish with the numbered work order and nothing else in it."
+    },
+    {
       "id": "settle",
       "agent": "implement",
       "needs": [
-        "defence"
+        "ruling"
       ],
       "remember": true,
       "verify": {
         "by": "prosecutor",
         "max_rounds": 3,
         "criteria": [
-          "Every charge the defence conceded as VALID is fixed in the code on disk",
+          "Every item in the judge's work order is done in the code on disk",
           "The fix introduced no new defect of the kind this indictment names — re-read the changed files, do not assume the remedy was clean",
-          "Nothing argued down as NOT A DEFECT was changed anyway",
+          "Nothing the ruling DISMISSED was changed anyway",
           "The change stayed inside the brief — no unrelated edits rode along"
         ]
       },
-      "prompt": "Fix what you conceded, and only that.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nYOUR DEFENCE:\n{defence}\n\nWork through the charges you answered VALID. Leave the ones you argued down alone — they were settled by argument, and re-litigating them with an edit wastes that. OUT OF SCOPE ones are somebody's later task.\n\nThen report, charge by charge, what you changed and where. The prosecutor reads the result and gets to charge again — including anything your fix broke. Its objections come back to you as another round, so answer them rather than restating the report. When it has nothing left, the judge rules on the brief."
-    },
-    {
-      "id": "ruling",
-      "agent": "spec",
-      "needs": [
-        "settle"
-      ],
-      "review_of": "settle",
-      "prompt": "You are the JUDGE, and you wrote the brief this work is measured against. You wrote neither the code nor the indictment.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nDEFENCE:\n{defence}\n\nWHAT THE AUTHOR SETTLED:\n{settle}\n\nThe prosecutor has already re-examined the result and stopped charging. Read the code yourself; a prosecutor running out of objections is evidence about the indictment, not a verdict on the brief.\n\nRule on each charge by number: UPHELD AND FIXED / DISMISSED (say which argument settled it) / NOTED (real, out of scope). Then answer the only question that is yours alone: does this meet the acceptance criteria you wrote? Name any criterion the whole exchange never touched — neither side is measured against a brief they did not write.\n\nFinish with: ships as-is, or the specific work left. Attribute each defect to the author that caused it — one that came from your own brief is yours."
+      "prompt": "Fix what the court upheld, and only that.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nYOUR DEFENCE:\n{defence}\n\nRULING AND WORK ORDER:\n{ruling}\n\nWork through the judge's work order — the charges it upheld plus anything it added itself. Leave DISMISSED charges alone even where you conceded them: the judge holds the brief and has ruled that the code is right. NOTED ones are somebody's later task.\n\nThen report, item by item, what you changed and where. The prosecutor reads the result and gets to charge again — including anything your fix broke — and its objections come back to you as another round, so answer them rather than restating the report."
     }
   ]
 }

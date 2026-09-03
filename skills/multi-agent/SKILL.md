@@ -141,7 +141,7 @@ python "$MAM" review claude --path src/x.py     # author=claude -> reviewer is n
 python "$MAM" graph research --input "..."      # web (agy) ∥ repo (codex) -> synthesis (claude)
 python "$MAM" graph build --input "..."         # spec -> build+gate -> review -> judge
 python "$MAM" graph build-2r --input "..."      # same, read by two reviewers instead of one
-python "$MAM" graph court --input "..."         # brief -> build -> charge <-> fix -> ruling
+python "$MAM" graph court --input "..."         # charge -> defence -> ruling -> fix <-> re-charge
 python "$MAM" mem search "topic"
 python "$MAM" mem lint
 ```
@@ -170,12 +170,13 @@ graph's findings without reading what it actually returned.
   have it silently rewritten. Nobody is assigned a part: the judge is whoever
   wrote the brief, the defence is whoever wrote the code, and the prosecutor is
   the one who did neither — so it needs a third agent, and binding refuses when
-  two of the three collapse onto one. The indictment is re-run after every fix:
-  the prosecutor holds the loop, so a remedy that breaks something else is
-  caught by the same adversary that filed the original charge. The judge rules
-  last, on the brief it wrote. Findings have to survive a reply before anyone
-  edits code, which is the point: a review that goes straight to a rewrite never
-  learns it was wrong.
+  two of the three collapse onto one. Nothing is edited until the dispute is
+  settled: the charge is answered in writing, then the judge rules between the
+  two, because "that is what I asked for" arrives too late once the author has
+  already rewritten it. The judge is a second reviewer as well as an arbiter —
+  it holds the brief, so it is the only party that can name a criterion neither
+  side raised. Then the author fixes the work order, and the prosecutor charges
+  again each round, including anything the remedy broke.
 - **`graph build-2r`** when one reader is not enough: the review step splits
   into design and correctness lenses that run in parallel, and the judge rules
   on both. Worth it when the implementer is cheap enough that a second reader
