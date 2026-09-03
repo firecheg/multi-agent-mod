@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.4.0
+  version: 1.5.0
 ---
 
 # /multi-agent
@@ -64,6 +64,7 @@ before acting on it.
 | spec, architecture, judging, reconciling conflicting sources, final verdict | `claude` |
 | implementation, refactors, tight diffs, tests, anything that must *run* | `codex` |
 | live web research, huge-document reading, browser/visual verification | `agy` |
+| implementation on a settled spec: mechanical edits, assets, routine refactors | `agy-flash` |
 
 Route by capability, not preference. The value is that three correlated
 models become partly independent when each does what it is better at and
@@ -88,6 +89,7 @@ python "$MAM" ask codex "..." --memory          # one agent, vault context injec
 python "$MAM" review claude --path src/x.py     # author=claude -> reviewer is not claude
 python "$MAM" graph research --input "..."      # web (agy) ∥ repo (codex) -> synthesis (claude)
 python "$MAM" graph build --input "..."         # spec -> build+gate -> review -> judge
+python "$MAM" graph build-flash --input "..."   # same, agy-flash builds, claude ∥ codex review
 python "$MAM" mem search "topic"
 python "$MAM" mem lint
 ```
@@ -112,6 +114,11 @@ graph's findings without reading what it actually returned.
   Read-only; safe default when unsure.
 - **`graph build`** for implementation you want gated. It *modifies the
   repo* — confirm with the user before running it on their project.
+- **`graph build-flash`** when the spec is settled and the work is mechanical:
+  `agy-flash` implements, and two reviewers read it instead of one (claude on
+  design, codex on correctness). Cheaper per run, and the second lens is what
+  buys back the trust. Keep `graph build` for exploratory or high-cost-of-error
+  work.
 - **Custom graph** when neither fits: write JSON to a temp file and pass the
   path. Node fields: `id`, `agent`, `needs`, `prompt`, `verify {by,
   max_rounds, criteria}`, `review_of`, `remember`, `memory`, `sandbox`.
@@ -189,6 +196,8 @@ Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.5.0** — `agy-flash` joins the roster, and `graph build-flash` runs it
+  behind two reviewers instead of one.
 - **1.4.0** — a graph node's `verify` block must list `criteria`; the spec is
   rejected at validation instead of running a gate that checks nothing.
 - **1.3.0** — a partial or blocked run must be reported as one, not as a pass.

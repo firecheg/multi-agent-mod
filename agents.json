@@ -53,6 +53,27 @@
       "install": "irm https://antigravity.google/cli/install.ps1 | iex   (then run `agy` once to log in)",
       "note": "Antigravity CLI 1.1.8. Replaced gemini-cli for individual accounts on 2026-06-18. Without --dangerously-skip-permissions headless tool calls are soft-denied, so it cannot write out.md; --sandbox is kept alongside it so auto-approval is not also unrestricted (verified: it still reads files and writes out.md). --print-timeout takes a Go duration and defaults to 5m0s, too short for a build node."
     },
+    "agy-flash": {
+      "bin": [
+        "~/AppData/Local/agy/bin/agy.exe",
+        "agy"
+      ],
+      "args": [
+        "-p",
+        "{prompt}",
+        "--dangerously-skip-permissions",
+        "--sandbox",
+        "--add-dir",
+        "{mem}",
+        "--print-timeout",
+        "30m",
+        "--model",
+        "gemini-3.8-flash-high"
+      ],
+      "role": "implementation on a settled spec: code, refactors, asset generation, mechanical edits — cheaper and faster than codex, and reviewed twice",
+      "install": "irm https://antigravity.google/cli/install.ps1 | iex   (then run `agy` once to log in)",
+      "note": "Same binary as agy, on gemini-3.8-flash-high. Strong at coding, but the output is not trusted on one pass: pair it with TWO reviewers (claude and codex) rather than the single reviewer pick_reviewer would return — see graphs/build-flash.json. Verified 2026-09-03: the model string answers."
+    },
     "gemini": {
       "bin": "gemini",
       "args": [
@@ -76,6 +97,11 @@
     "agy": [
       "claude",
       "codex"
+    ],
+    "agy-flash": [
+      "claude",
+      "codex",
+      "agy"
     ],
     "gemini": [
       "claude",

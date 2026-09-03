@@ -185,6 +185,7 @@ job it is actually better at and checking the jobs it did not do.
 | spec, architecture, judging, reconciling conflicting sources, final verdict | **claude** | holds a long brief without drifting; comfortable making the call and saying why the other agent was wrong |
 | implementation, refactors, tight diffs, test-writing, anything that must *run* | **codex** | OS-level sandbox, iterates against a failing test, doesn't sprawl the diff |
 | live web research, huge-document reading, browser/visual verification | **agy** | real search grounding, largest context, multimodal |
+| implementation on a settled spec: mechanical edits, asset generation, routine refactors | **agy-flash** | same binary as agy on a flash model — cheap and fast enough to be worth two reviews instead of one |
 
 **`agy` is Antigravity CLI, and it is what you want — not `gemini`.** Google
 stopped serving Gemini CLI for individual / AI Pro / AI Ultra accounts on
@@ -226,6 +227,12 @@ produced one.
 `graphs/build.json` — spec (claude) → build (codex, gated by an agy verifier
 loop, up to 3 rounds) → adversarial review (agy) → judge (claude). Claude wrote
 neither the code nor the review it judges.
+
+`graphs/build-flash.json` — the same shape with **agy-flash** implementing
+instead of codex, and two reviews instead of one: claude on design ∥ codex on
+correctness, then claude rules on both. Flash is cheap enough that paying for a
+second lens still comes out ahead; `agy` is deliberately not one of the two,
+since the same model family as the author is barely a second opinion.
 
 `graphs/research.json` — web (agy) ∥ repo (codex) in parallel → synthesis
 (claude).
