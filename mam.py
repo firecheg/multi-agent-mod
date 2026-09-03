@@ -46,6 +46,12 @@ CFG = json.loads((HOME / "agents.json").read_text(encoding="utf-8"))
 # lands in whatever public repo the harness was cloned from. The bundled
 # memory/ is the seed; MAM_MEMORY points at your own.
 MEM = Path(os.environ.get("MAM_MEMORY") or HOME / "memory").resolve()
+# Which CLIs a reader actually has, and who they want writing the spec, doing
+# the work and checking it, is a property of their machine — not of this repo.
+# Graphs therefore name ROLES ("implement", "review"), and roles.json binds each
+# to an installed agent. Untracked, like the vault: a clone ships shapes, not
+# somebody's roster.
+ROLES_FILE = Path(os.environ.get("MAM_ROLES") or HOME / "roles.json")
 RUNS = WORK / ".mam"
 # Two-char floor, not three: "AI", "Go", "C#", "ML" are exactly the terms a
 # technical vault is asked about, and dropping them made recall fail silently.
@@ -179,6 +185,51 @@ def mem_write(folder, name, description, mtype, body, reach="repo"):
 
 class AgentError(RuntimeError):
     pass
+
+
+COLD_START = """no roles configured yet. Ask the user which installed agent should write the
+spec, do the work and review it, then record the answer:
+  python mam.py init --spec <agent> --implement <agent> --review <agent> [--review <agent2>]
+`python mam.py doctor` lists what is installed."""
+
+
+def load_roles():
+    """role -> agent. Empty when the user has not run `init` yet."""
+    if not ROLES_FILE.exists():
+        return {}
+    return json.loads(ROLES_FILE.read_text(encoding="utf-8"))
+
+
+def bind_roles(spec, roles=None):
+    """Substitute role names for agent names throughout a graph spec.
+
+    Roles share the agent namespace and are consulted only when the name is not
+    an installed agent, so a spec that names agents outright still runs.
+    """
+    roles = load_roles() if roles is None else roles
+    bound = json.loads(json.dumps(spec))
+
+    def bind(name, where):
+        if name in CFG["agents"]:
+            return name
+        if name in roles:
+            return roles[name]
+        have = f"Roles you have: {', '.join(sorted(roles))}" if roles else ""
+        raise ValueError(
+            f"{where}: {name!r} is neither an installed agent nor a configured role."
+            + (chr(10) + have if have else "") + chr(10) + COLD_START
+        )
+
+    for n in bound["nodes"]:
+        n["agent"] = bind(n["agent"], n["id"])
+        v = n.get("verify")
+        if v and v.get("by"):
+            v["by"] = bind(v["by"], f"{n['id']}.verify.by")
+    # Two roles can point at the same agent, which turns a cross-check back into
+    # self-review — invisible in the spec, and only true after binding. Re-run
+    # the structural checks against the agents that will actually run.
+    validate(bound)
+    return bound
 
 
 def resolve(agent):
@@ -552,6 +603,11 @@ def run_graph(spec, inputs, quiet=False):
 def cmd_doctor(a):
     print(f"harness   {HOME}")
     print(f"workspace {WORK}   (agents run here; override with MAM_WORKSPACE)")
+    _roles = load_roles()
+    if _roles:
+        print("roles     " + ", ".join(f"{r}={g}" for r, g in _roles.items()))
+    else:
+        print("roles     (none)  " + COLD_START.splitlines()[0])
     print(f"vault     {MEM}" + ("   (bundled seed — set MAM_MEMORY to keep notes"
                                 " out of the clone)" if MEM == HOME / "memory" else ""))
     for name, spec in CFG["agents"].items():
@@ -608,12 +664,49 @@ def cmd_review(a):
     ), d))
 
 
+def cmd_init(a):
+    """Cold start: record who fills each role on THIS machine."""
+    roles = load_roles()
+    asked = {"spec": a.spec, "implement": a.implement, "judge": a.judge, "web": a.web}
+    for i, r in enumerate(a.review or []):
+        asked["review" if i == 0 else f"review_{i + 1}"] = r
+    if not any(asked.values()) and not roles:
+        sys.exit(COLD_START)
+
+    for role, agent in asked.items():
+        if not agent:
+            continue
+        if agent not in CFG["agents"]:
+            sys.exit(f"{role}: unknown agent {agent!r}; known: {', '.join(CFG['agents'])}")
+        if not installed(agent):
+            sys.exit(f"{role}: {agent} is configured but its binary was not found. "
+                     f"Install it ({CFG['agents'][agent]['install']}) or pick another.")
+        roles[role] = agent
+
+    # The judge rules on work it did not write, so defaulting it to the spec
+    # author is only safe while that author is not also the implementer.
+    if "judge" not in roles and roles.get("spec") and roles["spec"] != roles.get("implement"):
+        roles["judge"] = roles["spec"]
+
+    ROLES_FILE.write_text(json.dumps(roles, indent=2) + "\n", encoding="utf-8")
+    print(f"roles -> {ROLES_FILE}")
+    for role, agent in roles.items():
+        print(f"  {role:12} {agent}")
+    missing = [r for r in ("spec", "implement", "review") if r not in roles]
+    if missing:
+        print(f"\nstill unset: {', '.join(missing)} — graphs needing them will refuse to run")
+    if roles.get("implement") and roles.get("implement") == roles.get("review"):
+        print(f"\nWARNING: implement and review are both {roles['implement']} — "
+              f"that is self-review, and every graph using both will be rejected")
+
+
 def cmd_graph(a):
     spec = json.loads(Path(a.spec if os.sep in a.spec or a.spec.endswith(".json")
                            else HOME / "graphs" / f"{a.spec}.json").read_text(encoding="utf-8"))
     inputs = dict(kv.split("=", 1) for kv in a.set or [])
     if a.input:
         inputs["input"] = a.input
+    spec = bind_roles(spec)
     results, d, failed = run_graph(spec, inputs)
     print(f"\n=== {spec['name']} ===")
     for k, v in results.items():
@@ -665,6 +758,15 @@ def main():
     p.add_argument("--criteria", action="append", required=True,
                    help="repeatable; what must hold. The gate checks these and nothing else")
     p.set_defaults(fn=cmd_review)
+
+    p = sub.add_parser("init", help="record who fills each role on this machine")
+    p.add_argument("--spec", help="agent that writes the brief")
+    p.add_argument("--implement", help="agent that does the work")
+    p.add_argument("--review", action="append",
+                   help="agent that checks it; repeat for a second reviewer")
+    p.add_argument("--judge", help="agent that rules on the reviews (default: the spec agent)")
+    p.add_argument("--web", help="agent with live web access, for research graphs")
+    p.set_defaults(fn=cmd_init)
 
     p = sub.add_parser("graph", help="run a graph spec")
     p.add_argument("spec", help="graphs/<name>.json, or a name")

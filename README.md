@@ -223,22 +223,47 @@ produced one.
 
 ## Graphs
 
-`graphs/build.json` — spec (claude) → build (codex, gated by an agy verifier
-loop, up to 3 rounds) → adversarial review (agy) → judge (claude). Claude wrote
-neither the code nor the review it judges.
+`graphs/build.json` — spec → build (gated by the reviewer in a loop, up to 3
+rounds) → adversarial review → judge. The judge wrote neither the code nor the
+review it rules on; the runner enforces that after roles are bound, so pointing
+two roles at one agent is caught rather than quietly accepted.
+
+`graphs/build-2r.json` — the same shape read twice: the review step splits into
+a design lens and a correctness lens that fan out in parallel (both read-only),
+and the judge rules on both. Needs a `review_2` role. Worth it when the
+implementer is cheap enough that a second reader still comes out ahead, or when
+a miss is expensive.
 
 `graphs/research.json` — web (agy) ∥ repo (codex) in parallel → synthesis
 (claude).
+
+Graphs name **roles**, not agents — `spec`, `implement`, `review`, `judge`,
+`web`. Bind them to what you actually installed, once:
+
+```bash
+python mam.py init --spec claude --implement codex --review agy
+```
+
+`init` refuses an agent whose binary is missing, and warns when `implement` and
+`review` land on the same agent — that is self-review with two labels, and any
+graph using both is rejected once bound. Repeat `--review` for a second
+reviewer. `--judge` defaults to the spec agent. The binding lives in
+`roles.json` beside the harness (untracked; `MAM_ROLES` overrides), so a clone
+carries shapes and never somebody else's roster. `doctor` prints the binding,
+or tells you it is missing.
+
+The table above is a recommendation, not a default — put your own agents where
+they are strongest.
 
 A node is JSON:
 
 ```json
 {
   "id": "build",
-  "agent": "codex",
+  "agent": "implement",
   "needs": ["spec"],
   "prompt": "Implement this spec:\n{spec}",
-  "verify": { "by": "agy", "max_rounds": 3, "criteria": ["..."] },
+  "verify": { "by": "review", "max_rounds": 3, "criteria": ["..."] },
   "review_of": "some_other_node",
   "remember": true,
   "memory": false,

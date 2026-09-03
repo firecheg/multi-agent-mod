@@ -52,6 +52,42 @@ for bad in ({"by": "agy"}, {"by": "agy", "criteria": []}, {"max_rounds": 3}):
 mam.validate({"name": "t", "nodes": [
     {"id": "a", "agent": "codex", "prompt": "x", "verify": {}}]})
 
+import json
+# --- roles bind to agents, and a clone with no roster says so ---------------
+# A graph names roles so it runs on whatever the reader actually installed.
+# Binding is where a personal roster meets a shared shape; both failure modes
+# below are invisible in the spec itself and only true once bound.
+_ROSTER = {"spec": "claude", "implement": "codex", "review": "agy", "judge": "claude"}
+_g = {"name": "t", "nodes": [
+    {"id": "a", "agent": "implement", "prompt": "x", "verify": {"by": "review", "criteria": ["c"]}},
+    {"id": "b", "agent": "review", "needs": ["a"], "review_of": "a", "prompt": "y"},
+    {"id": "c", "agent": "codex", "needs": ["a"], "prompt": "z"},
+]}
+_b = mam.bind_roles(_g, _ROSTER)
+assert [n["agent"] for n in _b["nodes"]] == ["codex", "agy", "codex"], _b
+assert _b["nodes"][0]["verify"]["by"] == "agy", "verify.by must bind too"
+assert _g["nodes"][0]["agent"] == "implement", "bind_roles must not mutate the caller's spec"
+
+# an unconfigured role names itself and points at init, rather than failing deep
+try:
+    mam.bind_roles(_g, {"implement": "codex"})
+    raise SystemExit("FAIL: a graph bound with a missing role")
+except ValueError as e:
+    assert "'review'" in str(e) and "mam.py init" in str(e), e
+
+# two roles, one agent: a cross-check that is really self-review. Structurally
+# the spec is fine -- only the binding makes it a violation.
+try:
+    mam.bind_roles(_g, {"implement": "codex", "review": "codex", "spec": "claude"})
+    raise SystemExit("FAIL: review and implement on one agent was accepted")
+except ValueError as e:
+    assert "differ" in str(e) or "self-review" in str(e), e
+
+# every shipped graph binds under a plausible roster
+for _p in (mam.HOME / "graphs").glob("*.json"):
+    _spec = json.loads(_p.read_text(encoding="utf-8"))
+    mam.bind_roles(_spec, {**_ROSTER, "review_2": "claude", "web": "agy"})
+
 # --- graph structure ------------------------------------------------------
 for bad, why in [
     ({"name": "t", "nodes": [{"id": "a", "agent": "codex", "needs": ["ghost"], "prompt": "x"}]}, "unknown dep"),

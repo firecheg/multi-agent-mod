@@ -5,16 +5,18 @@
   "nodes": [
     {
       "id": "spec",
-      "agent": "claude",
+      "agent": "spec",
       "prompt": "Write a tight implementation spec for this task. No code.\n\nTASK:\n{input}\n\nOutput: goal in one sentence; files to touch; the smallest design that works; explicit non-goals; 3-6 acceptance criteria that a skeptic could check against the actual diff."
     },
     {
       "id": "build",
-      "agent": "codex",
-      "needs": ["spec"],
+      "agent": "implement",
+      "needs": [
+        "spec"
+      ],
       "remember": true,
       "verify": {
-        "by": "agy",
+        "by": "review",
         "max_rounds": 3,
         "criteria": [
           "Every acceptance criterion in the spec is actually met by the code on disk",
@@ -27,15 +29,19 @@
     },
     {
       "id": "review",
-      "agent": "agy",
-      "needs": ["build"],
+      "agent": "review",
+      "needs": [
+        "build"
+      ],
       "review_of": "build",
       "prompt": "Review this implementation as an adversarial reviewer. You did not write it.\n\nSPEC:\n{spec}\n\nAUTHOR'S REPORT:\n{build}\n\nRead the actual files on disk — do not trust the report. Find real defects only: correctness bugs, unhandled inputs, security issues, spec violations, needless complexity. For each: file:line, why it breaks, concrete fix. If you find nothing real, say so — do not manufacture findings."
     },
     {
       "id": "judge",
-      "agent": "claude",
-      "needs": ["review"],
+      "agent": "judge",
+      "needs": [
+        "review"
+      ],
       "prompt": "You are the judge. Neither of the two agents below may overrule you, and you wrote neither artifact.\n\nSPEC:\n{spec}\n\nBUILD (codex):\n{build}\n\nREVIEW (agy):\n{review}\n\nFor each review finding decide: VALID (fix now) / MINOR (log it) / WRONG (reviewer erred — say why). Then give the verdict: SHIP or BLOCK, and if BLOCK, the exact remaining work as a numbered list."
     }
   ]
