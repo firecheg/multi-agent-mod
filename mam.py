@@ -264,10 +264,11 @@ def bind_roles(spec, roles=None):
         )
 
     for n in bound["nodes"]:
-        n["agent"] = bind(n["agent"], n["id"])
-        v = n.get("verify")
-        if v and v.get("by"):
-            v["by"] = bind(v["by"], f"{n['id']}.verify.by")
+        for m in (_sub_nodes(n) or [n]):
+            m["agent"] = bind(m["agent"], m["id"])
+            v = m.get("verify")
+            if v and v.get("by"):
+                v["by"] = bind(v["by"], f"{m['id']}.verify.by")
     # Roles that must not collapse onto one agent. review_of covers the pairs
     # that have an edge in the graph; this covers the rest — "the prosecutor
     # wrote neither the spec nor the code" is a rule about three nodes, not an
@@ -499,6 +500,29 @@ def _ancestors(nid, nodes, seen=None):
 
 
 def validate(spec, input_keys=frozenset({"input"})):
+    for n in spec["nodes"]:
+        cfg = n.get("rounds")
+        if not cfg:
+            continue
+        if n.get("prompt") or n.get("agent"):
+            raise ValueError(f"{n['id']}: a rounds block runs its own nodes; it takes no agent or prompt")
+        if not cfg.get("nodes"):
+            raise ValueError(f"{n['id']}: rounds block has no nodes")
+        if any(_sub_nodes(s) for s in cfg["nodes"]):
+            raise ValueError(f"{n['id']}: rounds cannot nest")
+        if cfg.get("until") not in {s["id"] for s in cfg["nodes"]}:
+            raise ValueError(
+                f"{n['id']}: until={cfg.get('until')!r} names no node in the block. "
+                f"One of them has to decide when the argument is over, and it must end "
+                f"its answer with {{\"pass\": bool, \"issues\": [...]}}"
+            )
+    # {round} and {previous} come from the runner, not from a dependency, so
+    # they are only offered where a loop actually supplies them.
+    extra = {"round", "previous"} if any(_sub_nodes(n) for n in spec["nodes"]) else set()
+    _validate_flat(_flatten(spec), input_keys | extra)
+
+
+def _validate_flat(spec, input_keys):
     ids = {n["id"] for n in spec["nodes"]}
     if len(ids) != len(spec["nodes"]):
         raise ValueError("duplicate node ids")
@@ -551,7 +575,76 @@ def render(template, ctx):
         lambda m: str(ctx[m.group(1)]) if m.group(1) in ctx else m.group(0), template)
 
 
+def _sub_nodes(n):
+    return (n.get("rounds") or {}).get("nodes", [])
+
+
+def _flatten(spec):
+    """One pass through every rounds block, for structural checks.
+
+    A sub-node sees what the block waits on plus every sub-node before it —
+    exactly what one trip round the loop offers it. Later rounds add the
+    previous round's transcript, which the runner supplies as {previous} rather
+    than as a dependency, so that a node can read what came after it last time
+    without the graph having to admit a cycle.
+    """
+    blocks = {n["id"]: [s["id"] for s in _sub_nodes(n)] for n in spec["nodes"] if _sub_nodes(n)}
+    flat = []
+    for n in spec["nodes"]:
+        needs = []
+        for d in n.get("needs", []):
+            needs += blocks.get(d, [d])
+        if not _sub_nodes(n):
+            flat.append({**n, "needs": needs})
+            continue
+        before = []
+        for s in _sub_nodes(n):
+            flat.append({**s, "needs": needs + before})
+            before = before + [s["id"]]
+    return {**spec, "nodes": flat}
+
+
+def run_rounds(node, ctx, run_dir, log):
+    """Run a block of nodes over and over until the deciding one says stop.
+
+    The verify loop pairs one author with one verifier, which is enough when a
+    single agent is being held to account. A three-cornered argument — accuser,
+    author, arbiter — does not fit in it: whoever is not the verifier only ever
+    speaks once, and the party that has to keep re-reading the code after each
+    fix is precisely the one you cannot afford to silence.
+    """
+    cfg = node["rounds"]
+    nid, until, limit = node["id"], cfg["until"], cfg.get("max", 3)
+    local = dict(ctx)
+    local["previous"] = ""
+    for r in range(1, limit + 1):
+        local["round"] = f"{r} of {limit}"
+        transcript, verdict = [], None
+        for s in cfg["nodes"]:
+            out = run_node(s, local, run_dir / f"{nid}.r{r}", log)
+            local[s["id"]] = ctx[s["id"]] = out
+            transcript.append(f"--- {s['id']}, round {r} ---{chr(10)}{out[:20000]}")
+            if s["id"] != until:
+                continue
+            ok, issues = parse_verdict(out)
+            log(f"  {nid} round {r}/{limit}: {until} says "
+                + ("SETTLED" if ok else f"{len(issues)} open"))
+            if ok:
+                return out
+            verdict = issues
+        # Only what actually happened, and only the round just gone: handing an
+        # agent the whole history invites it to relitigate a point that was
+        # settled two rounds ago.
+        local["previous"] = (chr(10) * 2).join(transcript)
+    raise AgentError(
+        f"{nid}: {until} was still unsatisfied after {limit} rounds. Last: "
+        + "; ".join(verdict or ["no issues reported"])
+    )
+
+
 def run_node(node, ctx, run_dir, log):
+    if node.get("rounds"):
+        return run_rounds(node, ctx, run_dir, log)
     nid = node["id"]
     agent = node["agent"]
     task = render(node["prompt"], ctx)
@@ -645,6 +738,11 @@ def run_graph(spec, inputs, quiet=False):
                 n = futs[fut]
                 try:
                     results[n["id"]] = ctx[n["id"]] = fut.result()
+                    # A block's argument is the interesting part of its run;
+                    # keeping only the closing verdict throws the case away.
+                    for m in _sub_nodes(n):
+                        if m["id"] in ctx:
+                            results[m["id"]] = ctx[m["id"]]
                 except Exception as e:
                     results[n["id"]] = f"FAILED: {e}"     # never enters ctx
                     failed.add(n["id"])

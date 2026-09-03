@@ -196,6 +196,61 @@ try:
 finally:
     mam.installed = _real
 
+# --- a rounds block: three parties argue until the decider stops them -------
+# The verify loop pairs one author with one verifier, which cannot seat a
+# three-cornered argument: whoever is not the verifier speaks once, and the
+# party that has to re-read the code after each fix is the one you cannot
+# afford to silence.
+_orig_rn = mam.run_node
+_calls = []
+_verdicts = iter(['not yet {"pass": false, "issues": ["do the thing"]}',
+                  'better {"pass": true, "issues": []}'])
+def _fake(node, ctx, run_dir, log):
+    if node.get("rounds"):
+        return _orig_rn(node, ctx, run_dir, log)   # exercise run_rounds itself
+    _calls.append((node["id"], ctx.get("round"), bool(ctx.get("previous"))))
+    return next(_verdicts) if node["id"] == "decide" else node["id"]
+
+_loop = {"name": "t", "nodes": [{"id": "block", "rounds": {"max": 4, "until": "decide", "nodes": [
+    {"id": "accuse", "agent": "codex", "prompt": "a {round} {previous}"},
+    {"id": "decide", "agent": "claude", "prompt": "d {accuse}"},
+    {"id": "act", "agent": "agy", "prompt": "f {decide}"},
+]}}]}
+mam.validate(_loop)
+mam.run_node = _fake
+try:
+    _res, _dir, _failed = mam.run_graph(_loop, {}, quiet=True)
+    assert not _failed, _failed
+    assert [c[0] for c in _calls] == ["accuse", "decide", "act", "accuse", "decide"], _calls
+    assert _calls[0][1] == "1 of 4" and _calls[3][1] == "2 of 4", "round must be offered"
+    assert _calls[0][2] is False and _calls[3][2] is True, "{previous} is empty first, filled after"
+    assert _res["block"].startswith("better"), _res["block"]
+    assert _res["accuse"] == "accuse", "sub-node outputs must reach the outer results"
+    shutil.rmtree(_dir, ignore_errors=True)
+
+    # running out of rounds is a failure, not a quiet pass
+    _calls.clear()
+    _verdicts = iter(['{"pass": false, "issues": ["still wrong"]}'] * 9)
+    _res, _dir, _failed = mam.run_graph(_loop, {}, quiet=True)
+    assert _failed == {"block"}, _failed
+    assert "still wrong" in _res["block"], _res["block"]
+    assert sum(1 for c in _calls if c[0] == "act") == 4, "every round must run the fix"
+    shutil.rmtree(_dir, ignore_errors=True)
+finally:
+    mam.run_node = _orig_rn
+
+for _bad, _why in (
+    ({"id": "x", "rounds": {"until": "nope", "nodes": [{"id": "a", "agent": "claude", "prompt": "p"}]}}, "names no node"),
+    ({"id": "x", "agent": "claude", "prompt": "p",
+      "rounds": {"until": "a", "nodes": [{"id": "a", "agent": "claude", "prompt": "p"}]}}, "takes no agent"),
+    ({"id": "x", "rounds": {"until": "a", "nodes": [{"id": "a", "agent": "claude", "prompt": "{nope}"}]}}, "neither an input"),
+):
+    try:
+        mam.validate({"name": "t", "nodes": [_bad]})
+        raise SystemExit(f"FAIL: accepted a block that should not validate ({_why})")
+    except ValueError as e:
+        assert _why in str(e), e
+
 # --- graph structure ------------------------------------------------------
 for bad, why in [
     ({"name": "t", "nodes": [{"id": "a", "agent": "codex", "needs": ["ghost"], "prompt": "x"}]}, "unknown dep"),

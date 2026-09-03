@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.8.0
+  version: 1.9.0
 ---
 
 # /multi-agent
@@ -141,7 +141,7 @@ python "$MAM" review claude --path src/x.py     # author=claude -> reviewer is n
 python "$MAM" graph research --input "..."      # web (agy) ∥ repo (codex) -> synthesis (claude)
 python "$MAM" graph build --input "..."         # spec -> build+gate -> review -> judge
 python "$MAM" graph build-2r --input "..."      # same, read by two reviewers instead of one
-python "$MAM" graph court --input "..."         # charge -> defence -> ruling -> fix <-> re-charge
+python "$MAM" graph court --input "..."         # (charge -> defence -> ruling -> fix) x3
 python "$MAM" mem search "topic"
 python "$MAM" mem lint
 ```
@@ -170,13 +170,12 @@ graph's findings without reading what it actually returned.
   have it silently rewritten. Nobody is assigned a part: the judge is whoever
   wrote the brief, the defence is whoever wrote the code, and the prosecutor is
   the one who did neither — so it needs a third agent, and binding refuses when
-  two of the three collapse onto one. Nothing is edited until the dispute is
-  settled: the charge is answered in writing, then the judge rules between the
-  two, because "that is what I asked for" arrives too late once the author has
-  already rewritten it. The judge is a second reviewer as well as an arbiter —
-  it holds the brief, so it is the only party that can name a criterion neither
-  side raised. Then the author fixes the work order, and the prosecutor charges
-  again each round, including anything the remedy broke.
+  two of the three collapse onto one. Every round is charge, written answer,
+  ruling, fix, and it repeats until the judge's verdict comes back `pass`.
+  Nothing is edited before the ruling, so "that is what I asked for" arrives in
+  time to save a rewrite; the judge is a reviewer as well as an arbiter, and
+  being the only party holding the brief it is the only one that can charge for
+  something never built at all. Rounds running out is a failure, not a pass.
 - **`graph build-2r`** when one reader is not enough: the review step splits
   into design and correctness lenses that run in parallel, and the judge rules
   on both. Worth it when the implementer is cheap enough that a second reader
@@ -184,6 +183,12 @@ graph's findings without reading what it actually returned.
 - **Custom graph** when neither fits: write JSON to a temp file and pass the
   path. Node fields: `id`, `agent`, `needs`, `prompt`, `verify {by,
   max_rounds, criteria}`, `review_of`, `remember`, `memory`, `sandbox`.
+  `rounds {nodes, until, max}` replaces agent and prompt with a block of nodes
+  run in order, over and over, until the `until` node's answer ends in
+  `{"pass": bool, "issues": [...]}`. Use it when more than two parties have to
+  keep answering each other — `verify` seats one author and one verifier, and
+  everyone else in that loop speaks once. Sub-nodes also get `{round}` and
+  `{previous}`, the transcript of the round just gone.
   A `verify` block must list `criteria` — validation rejects a gate that
   states none, for the same reason `review` requires them.
   `{node_id}` interpolates that node's output, `{input}` the CLI argument.
@@ -258,6 +263,8 @@ Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.9.0** — `rounds` blocks: several nodes repeat until one of them returns a
+  passing verdict. `graph court` is three parties arguing inside one.
 - **1.8.0** — `graph court`: the author defends its own work against a
   prosecutor who wrote neither the brief nor the code, and the judge who wrote
   the brief rules. A spec can declare roles that must not collapse.
