@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.3.0
+  version: 1.4.0
 ---
 
 # /multi-agent
@@ -115,6 +115,8 @@ graph's findings without reading what it actually returned.
 - **Custom graph** when neither fits: write JSON to a temp file and pass the
   path. Node fields: `id`, `agent`, `needs`, `prompt`, `verify {by,
   max_rounds, criteria}`, `review_of`, `remember`, `memory`, `sandbox`.
+  A `verify` block must list `criteria` — validation rejects a gate that
+  states none, for the same reason `review` requires them.
   `{node_id}` interpolates that node's output, `{input}` the CLI argument.
   Nodes with satisfied deps run in parallel.
 
@@ -187,6 +189,8 @@ Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.4.0** — a graph node's `verify` block must list `criteria`; the spec is
+  rejected at validation instead of running a gate that checks nothing.
 - **1.3.0** — a partial or blocked run must be reported as one, not as a pass.
   And `review` now requires at least one `--criteria` and refuses the
   run at parse time without it. Previously it substituted "Correct, minimal,

@@ -36,6 +36,22 @@ try:
 except ValueError as e:
     assert "differ" in str(e), e
 
+# --- a declared gate must say what it checks -------------------------------
+# The verifier checks the criteria and nothing else. run_node used to supply
+# "The task is fully done and correct." when a verify block named none, so the
+# gate ran, cost a call per round, and passed a stub with a TODO straight into
+# the next node's prompt as finished work. A spec like that is now invalid.
+for bad in ({"by": "agy"}, {"by": "agy", "criteria": []}, {"max_rounds": 3}):
+    try:
+        mam.validate({"name": "t", "nodes": [
+            {"id": "a", "agent": "codex", "prompt": "x", "verify": bad}]})
+        raise SystemExit(f"FAIL: gate without criteria was accepted: {bad}")
+    except ValueError as e:
+        assert "no criteria" in str(e), e
+# an empty verify block is how you say "no gate" — still legal, still ungated
+mam.validate({"name": "t", "nodes": [
+    {"id": "a", "agent": "codex", "prompt": "x", "verify": {}}]})
+
 # --- graph structure ------------------------------------------------------
 for bad, why in [
     ({"name": "t", "nodes": [{"id": "a", "agent": "codex", "needs": ["ghost"], "prompt": "x"}]}, "unknown dep"),
