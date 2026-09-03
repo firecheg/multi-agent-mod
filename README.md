@@ -234,6 +234,16 @@ and the judge rules on both. Needs a `review_2` role. Worth it when the
 implementer is cheap enough that a second reader still comes out ahead, or when
 a miss is expensive.
 
+`graphs/court.json` — brief → build → indictment → defence → settle. The parts
+are not assigned: the judge is whoever wrote the brief, the defence is whoever
+wrote the code, and the prosecutor is the one who did neither, so it needs three
+agents and refuses to run when two of the roles land on one. The author answers
+every charge in writing before touching anything, and only what it concedes gets
+fixed; the judge then holds the brief against the result and either accepts it or
+sends its own objections back for another round. A finding has to survive a reply
+before it costs an edit — a review that goes straight to a rewrite never finds
+out it was wrong.
+
 `graphs/research.json` — web (agy) ∥ repo (codex) in parallel → synthesis
 (claude).
 

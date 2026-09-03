@@ -268,6 +268,22 @@ def bind_roles(spec, roles=None):
         v = n.get("verify")
         if v and v.get("by"):
             v["by"] = bind(v["by"], f"{n['id']}.verify.by")
+    # Roles that must not collapse onto one agent. review_of covers the pairs
+    # that have an edge in the graph; this covers the rest — "the prosecutor
+    # wrote neither the spec nor the code" is a rule about three nodes, not an
+    # edge between two, and it is only true or false once the roles are bound.
+    for group in spec.get("distinct", []):
+        seen = {}
+        for role in group:
+            agent = bind(role, f"distinct {group}")
+            if agent in seen:
+                raise ValueError(
+                    f"roles {seen[agent]!r} and {role!r} both resolve to {agent!r}, and "
+                    f"{spec['name']} needs them apart. Give one of them a different agent: "
+                    f"python mam.py init --role {role}=<agent>"
+                )
+            seen[agent] = role
+
     # Two roles can point at the same agent, which turns a cross-check back into
     # self-review — invisible in the spec, and only true after binding. Re-run
     # the structural checks against the agents that will actually run.

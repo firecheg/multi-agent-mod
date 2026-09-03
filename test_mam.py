@@ -86,7 +86,7 @@ except ValueError as e:
 # every shipped graph binds under a plausible roster
 for _p in (mam.HOME / "graphs").glob("*.json"):
     _spec = json.loads(_p.read_text(encoding="utf-8"))
-    mam.bind_roles(_spec, {**_ROSTER, "review_2": "claude", "web": "agy"})
+    mam.bind_roles(_spec, {**_ROSTER, "review_2": "claude", "web": "agy", "prosecutor": "gemini"})
 
 # --- agents.local.json layers over the tracked roster ----------------------
 # The tracked file says what the agents are; a machine says where its binaries
@@ -164,6 +164,37 @@ try:
         assert "none of them installed" in str(e), e
 finally:
     mam.installed = _real_installed
+
+# --- roles that must not collapse onto one agent ---------------------------
+# Who plays which part in `court` follows from what each agent did: the judge
+# wrote the brief, the defence wrote the code, the prosecutor did neither. That
+# last one is a rule about three nodes rather than an edge between two, so
+# review_of cannot express it and `distinct` does.
+_court = {"name": "c", "distinct": [["spec", "implement", "prosecutor"]], "nodes": [
+    {"id": "a", "agent": "spec", "prompt": "x"},
+    {"id": "b", "agent": "implement", "needs": ["a"], "prompt": "y"},
+]}
+mam.bind_roles(_court, {"spec": "claude", "implement": "agy", "prosecutor": "codex"})
+for _bad, _pair in (({"spec": "claude", "implement": "agy", "prosecutor": "claude"}, "spec"),
+                    ({"spec": "claude", "implement": "agy", "prosecutor": "agy"}, "implement")):
+    try:
+        mam.bind_roles(_court, _bad)
+        raise SystemExit(f"FAIL: prosecutor was allowed to be the {_pair}")
+    except ValueError as e:
+        assert "needs them apart" in str(e) and "init --role" in str(e), e
+
+# the collapse can also arrive through a fallback, which is the case no one
+# writes down: implement's first choice is gone, and its second is the prosecutor
+_real = mam.installed
+try:
+    mam.installed = lambda n: n != "agy"
+    try:
+        mam.bind_roles(_court, {"spec": "claude", "implement": ["agy", "codex"], "prosecutor": "codex"})
+        raise SystemExit("FAIL: a fallback collapsed two roles and was accepted")
+    except ValueError as e:
+        assert "needs them apart" in str(e), e
+finally:
+    mam.installed = _real
 
 # --- graph structure ------------------------------------------------------
 for bad, why in [

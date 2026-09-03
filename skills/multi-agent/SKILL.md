@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.7.0
+  version: 1.8.0
 ---
 
 # /multi-agent
@@ -141,6 +141,7 @@ python "$MAM" review claude --path src/x.py     # author=claude -> reviewer is n
 python "$MAM" graph research --input "..."      # web (agy) ∥ repo (codex) -> synthesis (claude)
 python "$MAM" graph build --input "..."         # spec -> build+gate -> review -> judge
 python "$MAM" graph build-2r --input "..."      # same, read by two reviewers instead of one
+python "$MAM" graph court --input "..."         # brief -> build -> indictment -> defence -> settle
 python "$MAM" mem search "topic"
 python "$MAM" mem lint
 ```
@@ -165,6 +166,14 @@ graph's findings without reading what it actually returned.
   Read-only; safe default when unsure.
 - **`graph build`** for implementation you want gated. It *modifies the
   repo* — confirm with the user before running it on their project.
+- **`graph court`** when you want the author to answer for its work rather than
+  have it silently rewritten. Nobody is assigned a part: the judge is whoever
+  wrote the brief, the defence is whoever wrote the code, and the prosecutor is
+  the one who did neither — so it needs a third agent, and binding refuses when
+  two of the three collapse onto one. The charge is filed once; after that the
+  author and the judge iterate until the judge is satisfied or the rounds run
+  out. Findings have to survive a reply before anyone edits code, which is the
+  point: a review that goes straight to a rewrite never learns it was wrong.
 - **`graph build-2r`** when one reader is not enough: the review step splits
   into design and correctness lenses that run in parallel, and the judge rules
   on both. Worth it when the implementer is cheap enough that a second reader
@@ -246,6 +255,9 @@ Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.8.0** — `graph court`: the author defends its own work against a
+  prosecutor who wrote neither the brief nor the code, and the judge who wrote
+  the brief rules. A spec can declare roles that must not collapse.
 - **1.7.0** — a role takes a preference order, not one agent; the first
   installed one wins. `--review-2` is now its own flag, and `--role NAME=a,b`
   sets roles beyond the built-in ones.

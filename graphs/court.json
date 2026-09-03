@@ -1,0 +1,49 @@
+{
+  "name": "court",
+  "_": "The author defends its own work. Who plays which part is not configured, it follows from what each agent did: the judge is whoever wrote the brief, the defence is whoever wrote the code, and the prosecutor is the one who did neither — which is why prosecutor must resolve to a third agent, and `distinct` enforces it. The charge is filed once; after that the loop is judge and author, because the judge is the one holding the brief the work is measured against. It ends when the judge is satisfied or the rounds run out, and running out is a node failure rather than a pass.",
+  "concurrency": 1,
+  "distinct": [["spec", "implement", "prosecutor"]],
+  "nodes": [
+    {
+      "id": "brief",
+      "agent": "spec",
+      "prompt": "Write a tight implementation spec for this task. No code.\n\nTASK:\n{input}\n\nOutput: goal in one sentence; files to touch; the smallest design that works; explicit non-goals; 3-6 acceptance criteria that a skeptic could check against the actual diff. You will be judging the result against these later, so write criteria you would be willing to rule on."
+    },
+    {
+      "id": "build",
+      "agent": "implement",
+      "needs": ["brief"],
+      "prompt": "Implement this spec in the repo. Then report what you changed, file by file.\n\nSPEC:\n{brief}\n\nOriginal task for context:\n{input}"
+    },
+    {
+      "id": "charge",
+      "agent": "prosecutor",
+      "needs": ["build"],
+      "review_of": "build",
+      "prompt": "You are the PROSECUTOR. You wrote neither this brief nor this code.\n\nBRIEF:\n{brief}\n\nAUTHOR'S REPORT:\n{build}\n\nRead the actual files on disk — do not trust the report. Charge only what you can point at: acceptance criteria the code does not meet, correctness bugs, unhandled inputs, races, security issues, tests that would pass against a broken implementation, conventions of the surrounding code that this breaks.\n\nNumber every charge. For each: file:line, what is wrong, the input or situation that exposes it, how serious. One defect per charge — a charge that bundles three cannot be ruled on.\n\nDo not manufacture charges. An empty indictment is a valid outcome; a padded one wastes everyone's round."
+    },
+    {
+      "id": "defence",
+      "agent": "implement",
+      "needs": ["charge"],
+      "prompt": "You are the DEFENCE, and you wrote this code. Answer the indictment — **make no edits to any file**, this round is argument only.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nTake the charges in order and answer every one with exactly one of:\n\n- VALID — the defect is real. Say so plainly, and add anything the prosecutor missed about its blast radius.\n- NOT A DEFECT — with the reason: the path is unreachable, the input is validated upstream, the convention it names is not the convention here, the prosecutor misread the control flow. Point at the evidence.\n- OUT OF SCOPE — real, but pre-existing or outside what the brief asked for. Say which.\n\nConceding a charge is not losing. A defence that fights every point tells the judge nothing, and you are about to be asked to fix whatever is upheld."
+    },
+    {
+      "id": "settle",
+      "agent": "implement",
+      "needs": ["defence"],
+      "remember": true,
+      "verify": {
+        "by": "spec",
+        "max_rounds": 3,
+        "criteria": [
+          "Every charge the defence conceded as VALID is fixed in the code on disk",
+          "Every acceptance criterion in the brief is met by the code, including any the indictment never raised",
+          "Nothing argued down as NOT A DEFECT was changed anyway",
+          "The change stayed inside the brief — no unrelated edits rode along"
+        ]
+      },
+      "prompt": "Fix what you conceded, and only that.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nYOUR DEFENCE:\n{defence}\n\nWork through the charges you answered VALID. Leave the ones you argued down alone — they were settled by argument, and re-litigating them with an edit wastes that. OUT OF SCOPE ones are somebody's later task.\n\nThen report, charge by charge, what you changed and where. The judge holds the brief and will rule on this; if it is not satisfied you will get its objections back and another round, so answer them rather than restating the report."
+    }
+  ]
+}
