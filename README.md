@@ -234,6 +234,31 @@ and the judge rules on both. Needs a `review_2` role. Worth it when the
 implementer is cheap enough that a second reader still comes out ahead, or when
 a miss is expensive.
 
+`graphs/court.json` — brief → build → (indictment → defence → ruling → fix) until
+the judge is satisfied. The parts
+are not assigned: the judge is whoever wrote the brief, the defence is whoever
+wrote the code, and the prosecutor is the one who did neither, so it needs three
+agents and refuses to run when two of the roles land on one. The author answers
+every charge in writing before touching anything, and the judge rules between the
+two — nothing has been edited yet, so a charge it dismisses costs nobody a
+rewrite, and "that is what I specified" is an answer the author does not pay for.
+The judge is a reviewer as much as an arbiter: holding the brief, it is the only
+party that can charge for an acceptance criterion neither side raised. Then the
+author carries out the work order and the whole thing goes round again, the
+prosecutor reading the result including anything the fix broke, until the judge's
+verdict comes back `pass` or the rounds run out — which fails the node rather
+than passing it.
+
+That loop is a `rounds` block, which any graph can use: a list of nodes run in
+order, repeatedly, until the node named by `until` answers with
+`{"pass": bool, "issues": [...]}`. `verify` seats one author and one verifier;
+`rounds` is for arguments with more than two sides, where everyone has to keep
+answering. Sub-nodes get `{round}` and `{previous}` — the transcript of the round
+just gone, and only that one, since handing an agent the whole history invites it
+to relitigate what was settled two rounds ago. A finding has to survive a reply
+before it costs an edit — a review that goes straight to a rewrite never finds
+out it was wrong.
+
 `graphs/research.json` — web (agy) ∥ repo (codex) in parallel → synthesis
 (claude).
 
