@@ -248,8 +248,15 @@ def bind_roles(spec, roles=None):
     def bind(name, where):
         if name in CFG["agents"]:
             return name
-        if name in roles:
-            return roles[name]
+        chain = role_chain(roles, name)
+        if chain:
+            for candidate in chain:
+                if installed(candidate):
+                    return candidate
+            raise ValueError(
+                f"{where}: role {name!r} lists {', '.join(chain)}, none of them installed. "
+                f"Run doctor, then re-run init for that role."
+            )
         have = f"Roles you have: {', '.join(sorted(roles))}" if roles else ""
         raise ValueError(
             f"{where}: {name!r} is neither an installed agent nor a configured role."
@@ -641,7 +648,8 @@ def cmd_doctor(a):
     print(f"workspace {WORK}   (agents run here; override with MAM_WORKSPACE)")
     _roles = load_roles()
     if _roles:
-        print("roles     " + ", ".join(f"{r}={g}" for r, g in _roles.items()))
+        print("roles     " + ", ".join(
+            f"{r}={'>'.join(role_chain(_roles, r))}" for r in _roles))
     else:
         print("roles     (none)  " + COLD_START.splitlines()[0])
     if AGENTS_LOCAL.exists():
@@ -702,39 +710,54 @@ def cmd_review(a):
     ), d))
 
 
+def role_chain(roles, role):
+    """The agents a role may resolve to, in the user's own order of preference."""
+    v = roles.get(role)
+    return [] if v is None else ([v] if isinstance(v, str) else list(v))
+
+
 def cmd_init(a):
     """Cold start: record who fills each role on THIS machine."""
     roles = load_roles()
-    asked = {"spec": a.spec, "implement": a.implement, "judge": a.judge, "web": a.web}
-    for i, r in enumerate(a.review or []):
-        asked["review" if i == 0 else f"review_{i + 1}"] = r
+    asked = {"spec": a.spec, "implement": a.implement, "review": a.review,
+             "review_2": a.review_2, "judge": a.judge, "web": a.web}
+    for pair in a.role or []:
+        if "=" not in pair:
+            sys.exit(f"--role wants NAME=agent[,agent]; got {pair!r}")
+        name, agents = pair.split("=", 1)
+        asked[name.strip()] = [x.strip() for x in agents.split(",") if x.strip()]
     if not any(asked.values()) and not roles:
         sys.exit(COLD_START)
 
-    for role, agent in asked.items():
-        if not agent:
+    for role, chain in asked.items():
+        if not chain:
             continue
-        if agent not in CFG["agents"]:
-            sys.exit(f"{role}: unknown agent {agent!r}; known: {', '.join(CFG['agents'])}")
-        if not installed(agent):
-            sys.exit(f"{role}: {agent} is configured but its binary was not found. "
-                     f"Install it ({CFG['agents'][agent]['install']}) or pick another.")
-        roles[role] = agent
+        for agent in chain:
+            if agent not in CFG["agents"]:
+                sys.exit(f"{role}: unknown agent {agent!r}; known: {', '.join(CFG['agents'])}")
+            if not installed(agent):
+                sys.exit(f"{role}: {agent} is configured but its binary was not found. "
+                         f"Install it ({CFG['agents'][agent]['install']}) or drop it from the chain.")
+        roles[role] = chain[0] if len(chain) == 1 else chain
 
     # The judge rules on work it did not write, so defaulting it to the spec
     # author is only safe while that author is not also the implementer.
-    if "judge" not in roles and roles.get("spec") and roles["spec"] != roles.get("implement"):
-        roles["judge"] = roles["spec"]
+    if "judge" not in roles and role_chain(roles, "spec") \
+            and role_chain(roles, "spec")[0] != (role_chain(roles, "implement") or [None])[0]:
+        roles["judge"] = role_chain(roles, "spec")[0]
 
     ROLES_FILE.write_text(json.dumps(roles, indent=2) + "\n", encoding="utf-8")
     print(f"roles -> {ROLES_FILE}")
-    for role, agent in roles.items():
-        print(f"  {role:12} {agent}")
+    for role in roles:
+        chain = role_chain(roles, role)
+        print(f"  {role:12} {chain[0]}" + (f"   (falls back to {', '.join(chain[1:])})"
+                                           if len(chain) > 1 else ""))
     missing = [r for r in ("spec", "implement", "review") if r not in roles]
     if missing:
         print(f"\nstill unset: {', '.join(missing)} — graphs needing them will refuse to run")
-    if roles.get("implement") and roles.get("implement") == roles.get("review"):
-        print(f"\nWARNING: implement and review are both {roles['implement']} — "
+    first = {r: (role_chain(roles, r) or [None])[0] for r in ("implement", "review")}
+    if first["implement"] and first["implement"] == first["review"]:
+        print(f"\nWARNING: implement and review both resolve to {first['implement']} — "
               f"that is self-review, and every graph using both will be rejected")
 
 
@@ -798,12 +821,19 @@ def main():
     p.set_defaults(fn=cmd_review)
 
     p = sub.add_parser("init", help="record who fills each role on this machine")
-    p.add_argument("--spec", help="agent that writes the brief")
-    p.add_argument("--implement", help="agent that does the work")
-    p.add_argument("--review", action="append",
-                   help="agent that checks it; repeat for a second reviewer")
-    p.add_argument("--judge", help="agent that rules on the reviews (default: the spec agent)")
-    p.add_argument("--web", help="agent with live web access, for research graphs")
+    # Every role takes a chain, not one name: an agent that is rate-limited or
+    # logged out should cost you a fallback, not a failed run. Repeat the flag,
+    # best first.
+    p.add_argument("--spec", action="append", help="writes the brief")
+    p.add_argument("--implement", action="append", help="does the work")
+    p.add_argument("--review", action="append", help="checks it")
+    p.add_argument("--review-2", action="append", dest="review_2",
+                   help="second, independent reviewer (graph build-2r)")
+    p.add_argument("--judge", action="append",
+                   help="rules on the reviews (default: the spec agent)")
+    p.add_argument("--web", action="append", help="live web access, for research graphs")
+    p.add_argument("--role", action="append", metavar="NAME=agent[,agent]",
+                   help="any other role a graph names, e.g. --role prosecutor=agy,codex")
     p.set_defaults(fn=cmd_init)
 
     p = sub.add_parser("graph", help="run a graph spec")
