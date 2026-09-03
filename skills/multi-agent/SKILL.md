@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
 license: MIT
 metadata:
-  version: 1.2.0
+  version: 1.3.0
 ---
 
 # /multi-agent
@@ -93,8 +93,11 @@ python "$MAM" mem lint
 ```
 
 `review` defaults to `git diff HEAD` when `--path` is omitted. Add `--task`
-(what the author was asked for) and repeatable `--criteria` — a reviewer
-without criteria invents its own.
+(what the author was asked for) and repeatable `--criteria` — the latter is
+**required**, and the parser refuses the run without it, before any model call.
+That is deliberate: the reviewer checks the criteria and nothing else, so a
+review launched without them comes back `{"pass": true, "issues": []}` on any
+diff and reads like a gate that held.
 
 Graph runs exit nonzero if any node failed or was skipped. Read
 `.mam/<run>/journal.log` and `result.json` before reporting; never describe a
@@ -173,12 +176,23 @@ Say which agent produced which claim. "codex found X, I judged it valid" is
 worth more than "the analysis shows X" — the user needs to know whose
 judgement they are getting and whether anything independent confirmed it.
 
+Report the run you actually got. A suite that was filtered, cut short, or
+blocked by a permission is not a green suite — say which it was and what is
+therefore still unchecked. An agent that could not run something says so
+instead of reasoning about what it would have printed.
+
 ## Changelog
 
 Semver in `metadata.version` above. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.3.0** — a partial or blocked run must be reported as one, not as a pass.
+  And `review` now requires at least one `--criteria` and refuses the
+  run at parse time without it. Previously it substituted "Correct, minimal,
+  no obvious bugs.", which reads like a review and checks nothing: an
+  876-line diff came back `{"pass": true, "issues": []}` and the gate looked
+  like it had held.
 - **1.2.0** — codex is invoked with `--sandbox workspace-write` instead of
   `--full-auto`, which codex 0.147 removed from `exec` (every build node died
   with rc=2 before reaching the model). A per-node `sandbox` now replaces that

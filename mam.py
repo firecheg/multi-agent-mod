@@ -596,7 +596,7 @@ def cmd_review(a):
     print(f"[{a.author}]'s work reviewed by [{reviewer}]", file=sys.stderr)
     print(run_agent(reviewer, VERIFY_TMPL.format(
         task=a.task, author=a.author, output=target[:60000],
-        criteria="\n".join(f"- {c}" for c in (a.criteria or ["Correct, minimal, no obvious bugs."])),
+        criteria="\n".join(f"- {c}" for c in a.criteria),
     ), d))
 
 
@@ -652,7 +652,10 @@ def main():
     p.add_argument("--by", help="force reviewer (must differ from author)")
     p.add_argument("--path", help="file to review; default = git diff HEAD")
     p.add_argument("--task", default="(not stated)", help="what the author was asked to do")
-    p.add_argument("--criteria", action="append")
+    # A reviewer finds what the criteria ask for and nothing else, so a review
+    # without them returns a vacuous PASS. Refuse rather than invent a default.
+    p.add_argument("--criteria", action="append", required=True,
+                   help="repeatable; what must hold. The gate checks these and nothing else")
     p.set_defaults(fn=cmd_review)
 
     p = sub.add_parser("graph", help="run a graph spec")
