@@ -88,6 +88,52 @@ for _p in (mam.HOME / "graphs").glob("*.json"):
     _spec = json.loads(_p.read_text(encoding="utf-8"))
     mam.bind_roles(_spec, {**_ROSTER, "review_2": "claude", "web": "agy"})
 
+# --- agents.local.json layers over the tracked roster ----------------------
+# The tracked file says what the agents are; a machine says where its binaries
+# live and what extra models it pays for. Without the split, adding an agent
+# means editing a tracked file and eating a conflict on every pull.
+import shutil, tempfile as _tf
+_d = pathlib.Path(_tf.mkdtemp())
+_local = _d / "agents.local.json"
+_orig_local, _orig_cfg = mam.AGENTS_LOCAL, mam.CFG
+try:
+    mam.AGENTS_LOCAL = _local
+    assert mam.load_agents() == json.loads(
+        (mam.HOME / "agents.json").read_text(encoding="utf-8")), "absent local file must change nothing"
+
+    _local.write_text(json.dumps({
+        "agents": {
+            "codex": {"bin": "/opt/codex"},
+            "extra": {"bin": "x", "args": [], "role": "r", "install": "i"},
+        },
+        "reviewers": {"extra": ["claude"]},
+        "timeout": 99,
+    }), encoding="utf-8")
+    _m = mam.load_agents()
+    assert _m["agents"]["codex"]["bin"] == "/opt/codex", "override did not apply"
+    assert _m["agents"]["codex"]["args"], "overriding bin must not drop the other fields"
+    assert "extra" in _m["agents"], "a local-only agent must be added"
+    assert _m["timeout"] == 99, "top-level keys must be overridable"
+    assert json.loads((mam.HOME / "agents.json").read_text(encoding="utf-8")
+                      )["agents"]["codex"]["bin"] != "/opt/codex", "the tracked file must stay untouched"
+
+    # an agent with no reviewers is not an author -- it would die mid-run with
+    # "no installed cross-reviewer", so the gap is filled at load
+    _local.write_text(json.dumps({"agents": {"lonely": {"bin": "x", "args": [], "role": "r", "install": "i"}}}),
+                      encoding="utf-8")
+    assert mam.load_agents()["reviewers"]["lonely"], "a new agent must get reviewers"
+    assert "lonely" not in mam.load_agents()["reviewers"]["lonely"], "and never itself"
+
+    _local.write_text(json.dumps({"reviewers": {"codex": ["codex", "claude"]}}), encoding="utf-8")
+    try:
+        mam.load_agents()
+        raise SystemExit("FAIL: an agent reviewing itself was accepted from the local file")
+    except ValueError as e:
+        assert "its own reviewer" in str(e), e
+finally:
+    mam.AGENTS_LOCAL, mam.CFG = _orig_local, _orig_cfg
+    shutil.rmtree(_d, ignore_errors=True)
+
 # --- graph structure ------------------------------------------------------
 for bad, why in [
     ({"name": "t", "nodes": [{"id": "a", "agent": "codex", "needs": ["ghost"], "prompt": "x"}]}, "unknown dep"),
