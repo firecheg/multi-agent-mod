@@ -17,6 +17,7 @@ stdlib only. python mam.py --help
 import argparse
 import concurrent.futures as cf
 import glob
+import hashlib
 import json
 import os
 import re
@@ -25,6 +26,10 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent / "execution"))
+from reasoning_router import (assessment_text, model_from_args, replace_effort_args,
+                              replace_model_args, route,
+                              validate_reasoning_config)
 
 # HOME holds the harness: config, graphs, and the one shared memory vault.
 # WORK is the project the agents actually operate on — normally wherever you
@@ -108,16 +113,53 @@ def _notes():
 
 def _meta(body):
     m = FRONTMATTER.match(body)
-    return dict(re.findall(r"^(\w+):[ \t]*(.+?)[ \t]*$", m.group(1), re.M)) if m else {}
+    return dict(re.findall(r"^(\w+):[ \t]*(.*?)[ \t]*$", m.group(1), re.M)) if m else {}
+
+
+def project_identity(work=None):
+    """Общий каталог Git объединяет worktree; обычные папки различает полный путь."""
+    root = Path(work if work is not None else WORK).resolve()
+    kind = "path:"
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            cwd=root, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=5, stdin=subprocess.DEVNULL)
+        if result.returncode == 0 and result.stdout.strip():
+            root = (root / result.stdout.strip()).resolve()
+            kind = "git:"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return kind + os.path.normcase(str(root))
+
+
+def project_id(work=None):
+    return hashlib.sha256(project_identity(work).encode("utf-8")).hexdigest()
+
+
+def _legacy_projects():
+    try:
+        mapping = json.loads((MEM / "legacy-projects.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(mapping, dict):
+        return {}
+    return {name: identity for name, identity in mapping.items()
+            if isinstance(identity, str) and identity.startswith(("git:", "path:"))
+            and Path(identity.split(":", 1)[1]).is_absolute()}
 
 
 def _in_reach(body):
     """Reach is declared at write time and never widened at read time: a note
     scoped to one repo must not leak into a sibling project's context."""
     md = _meta(body)
-    if md.get("reach") != "repo":
+    if md.get("reach") == "global":
         return True
-    return md.get("project", WORK.name) == WORK.name
+    if md.get("reach") != "repo":
+        return False
+    if "project_id" in md:
+        return md["project_id"] == project_id()
+    return _legacy_projects().get(md.get("project")) == project_identity()
 
 
 def _terms(text):
@@ -171,6 +213,11 @@ def mem_search(query, k=5):
 
 
 def mem_context(query, k=5):
+    budget = CFG.get("memory_max_chars", 6000)
+    if type(budget) is not int or budget < 0:
+        raise ValueError("memory_max_chars must be a non-negative integer")
+    if not budget:
+        return ""
     hits = mem_search(query, k)
     if not hits:
         return ""
@@ -180,7 +227,15 @@ def mem_context(query, k=5):
         rel = p.relative_to(MEM).as_posix()
         text = p.read_text(encoding="utf-8", errors="replace").strip()
         out.append(f"\n### {rel}\n{_excerpt(text, q)}")
-    return "\n".join(out) + "\n\n---\n\n"
+    text = "\n".join(out)
+    ending = "\n\n---\n\n"
+    if len(text) + len(ending) <= budget:
+        return text + ending
+    marker = "\n[Memory truncated]" + ending
+    # Малый бюджет не позволяет честно пометить обрезку — пропускаем память.
+    if budget < len(out[0]) + len(marker):
+        return ""
+    return text[:budget - len(marker)] + marker
 
 
 def mem_lint():
@@ -198,17 +253,40 @@ def mem_lint():
         md = _meta(p.read_text(encoding="utf-8", errors="replace"))
         if md.get("name") not in (None, p.stem):
             bad.append((p, f"name {md['name']!r} does not match the filename"))
-        # a repo-scoped note with no project is invisible nowhere and visible
-        # everywhere — the one state that silently defeats the reach rule
-        if md.get("reach") == "repo" and "project" not in md:
-            bad.append((p, "reach: repo without a project: field"))
+        if md.get("reach") not in ("repo", "global"):
+            bad.append((p, "missing or invalid reach"))
+        elif md.get("reach") == "repo":
+            if "project_id" in md:
+                if not re.fullmatch(r"[0-9a-f]{64}", md["project_id"]):
+                    bad.append((p, "invalid project_id"))
+            elif md.get("project") not in _legacy_projects():
+                bad.append((p, "legacy project has no valid binding"))
     return bad
 
 
 def mem_write(folder, name, description, mtype, body, reach="repo"):
-    p = MEM / folder / f"{name}.md"
+    for value in (folder, name):
+        if not isinstance(value, str) or not re.fullmatch(r"[a-z0-9]+(?:[-_][a-z0-9]+)*", value) \
+                or re.fullmatch(r"con|prn|aux|nul|com[0-9]|lpt[0-9]", value):
+            raise ValueError("folder and name must be simple lowercase slugs")
+    if folder == "projects":
+        raise ValueError("projects is reserved for project namespaces")
+    if reach not in ("repo", "global"):
+        raise ValueError("reach must be repo or global")
+    if any(not isinstance(v, str) or "\n" in v or "\r" in v for v in (description, mtype)):
+        raise ValueError("description and type must be single lines")
+    pid = project_id() if reach == "repo" else None
+    base = MEM / "projects" / pid if pid else MEM
+    p = base / folder / f"{name}.md"
+    # Проверяем разрешённый путь до mkdir: ссылки не должны вывести запись из проекта.
+    if not p.resolve().is_relative_to(base.resolve()) or not base.resolve().is_relative_to(MEM.resolve()):
+        raise ValueError("note path escapes its memory namespace")
+    if p.exists():
+        previous = _meta(p.read_text(encoding="utf-8", errors="replace"))
+        if previous.get("reach") != reach or (pid and previous.get("project_id") != pid):
+            raise ValueError("existing note belongs to another scope")
     p.parent.mkdir(parents=True, exist_ok=True)
-    scope = f"reach: {reach}\n" + (f"project: {WORK.name}\n" if reach == "repo" else "")
+    scope = f"reach: {reach}\n" + (f"project_id: {pid}\n" if pid else "")
     p.write_text(
         f"---\nname: {name}\ndescription: {description}\ntype: {mtype}\n"
         f"date: {time.strftime('%Y-%m-%d')}\n{scope}---\n\n{body.strip()}\n",
@@ -374,7 +452,9 @@ def apply_sandbox(args, mode):
     return out + ["--sandbox", mode]
 
 
-def run_agent(agent, prompt, node_dir, timeout=None, sandbox=None):
+def run_agent(agent, prompt, node_dir, timeout=None, sandbox=None, effort=None,
+              task_kind=None, reasoning_dimensions=None, model=None, routing_task=None,
+              cap=None):
     """Write prompt to a file, tell the agent to read it and answer into out.md."""
     exe, spec = resolve(agent)
     node_dir.mkdir(parents=True, exist_ok=True)
@@ -387,32 +467,73 @@ def run_agent(agent, prompt, node_dir, timeout=None, sandbox=None):
     # into the memory vault, and — having found no instructions — returned an
     # invented PASS with rc=0. An agent that cannot find its prompt must fail,
     # not improvise, and only an unambiguous path guarantees that.
+    # Агент под read-only песочницей физически не может записать out.md, и
+    # просьба это сделать стоила бы целого узла. Такие агенты объявляют {out} в
+    # args (`--output-last-message`): файл пишет сам CLI, мимо песочницы, а
+    # ответом становится последнее сообщение.
+    writes_own_out = "{out}" not in " ".join(spec["args"])
     boot = (
         f"Read the file {pf.as_posix()} and follow its instructions exactly. "
-        f"Write your complete final answer to {of.as_posix()} (overwrite it). "
-        f"Do not ask clarifying questions; state assumptions instead."
+        + (f"Write your complete final answer to {of.as_posix()} (overwrite it). "
+           if writes_own_out else
+           "Your FINAL MESSAGE is the answer — do not write or edit any file. ")
+        + "Do not ask clarifying questions; state assumptions instead."
     )
     # {mem} -> --add-dir the vault. Agents are sandboxed to the workspace, and
     # the vault lives with the harness, so without this a `remember` node
     # cannot write the note it was just asked for.
     args = [a.replace("{prompt}", boot).replace("{mem}", MEM.as_posix())
+                     .replace("{out}", of.as_posix())
             for a in spec["args"]]
-    if sandbox and agent == "codex":
+    provider = agent.split("-", 1)[0]
+    reasoning = validate_reasoning_config({
+        **({'effort':effort} if effort is not None else {}),
+        **({'task_kind':task_kind} if task_kind is not None else {}),
+        **({'dimensions':reasoning_dimensions} if reasoning_dimensions is not None else {}),
+        **({'cap':cap} if cap is not None else {}),
+        **({'model':model} if model is not None else {}),
+    }, allow_model=True)
+    if model is not None:
+        args = replace_model_args(args, provider, reasoning['model'])
+    configured_model = model_from_args(args, provider)
+    decision = route(provider, configured_model,
+                     assessment_text(routing_task if routing_task is not None else prompt),
+                     reasoning.get('dimensions'), reasoning.get('task_kind'),
+                     reasoning.get('effort', 'auto'), reasoning.get('cap'))
+    args = replace_effort_args(args, provider, decision.get("effective"))
+    # Семейство, а не точное имя: codex-luna и codex-astra — тот же бинарник
+    # с тем же флагом --sandbox, и на точном сравнении пер-узловой
+    # override молча не применялся бы к ним.
+    if sandbox and agent.split("-")[0] == "codex":
         args = apply_sandbox(args, sandbox)
 
     t0 = time.time()
-    proc = subprocess.run(
-        # stdin=DEVNULL: an orchestrated child must never be able to block on a
-        # prompt. Without it a node just burns its whole timeout waiting.
-        [exe, *args], cwd=WORK, capture_output=True, text=True, stdin=subprocess.DEVNULL,
-        encoding="utf-8", errors="replace", timeout=timeout or CFG["timeout"],
-    )
+    argv = [exe, *args]
+    metadata = {"agent":agent, "argv":argv, "reasoning":decision,
+                "status":"running"}
+    (node_dir / "meta.json").write_text(
+        json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    try:
+        proc = subprocess.run(
+            # stdin=DEVNULL: an orchestrated child must never be able to block on a
+            # prompt. Without it a node just burns its whole timeout waiting.
+            argv, cwd=WORK, capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            encoding="utf-8", errors="replace", timeout=timeout or CFG["timeout"],
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        metadata.update(status="failed", secs=round(time.time() - t0, 1),
+                        error=str(exc))
+        (node_dir / "meta.json").write_text(
+            json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+        raise
     # utf-8-sig: codex writes out.md with a BOM, which utf-8 keeps as a leading
     # ﻿. That character then rides into every downstream node's prompt and
     # blows up any console that is not UTF-8.
     text = of.read_text(encoding="utf-8-sig", errors="replace") if of.exists() else ""
     (node_dir / "meta.json").write_text(json.dumps({
-        "agent": agent, "argv": [exe, *args], "rc": proc.returncode,
+        "agent": agent, "argv": argv, "rc": proc.returncode,
+        "reasoning": decision,
+        "status": "ok" if proc.returncode == 0 and text.strip() else "failed",
         "secs": round(time.time() - t0, 1), "stderr": proc.stderr[-4000:],
         "stdout": proc.stdout[-4000:],
     }, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -528,6 +649,11 @@ def _validate_flat(spec, input_keys):
         raise ValueError("duplicate node ids")
     nodes = {n["id"]: n for n in spec["nodes"]}
     for n in spec["nodes"]:
+        legacy_reasoning = {key:n[key] for key in ("effort", "task_kind") if key in n}
+        if legacy_reasoning:
+            validate_reasoning_config(legacy_reasoning)
+        if "reasoning" in n:
+            validate_reasoning_config(n["reasoning"], allow_model=True)
         for d in n.get("needs", []):
             if d not in ids:
                 raise ValueError(f"{n['id']}: unknown dep {d!r}")
@@ -555,6 +681,8 @@ def _validate_flat(spec, input_keys):
                     f"{n['id']} reviews {target} but both run on {n['agent']!r} — self-review is banned"
                 )
         v = n.get("verify")
+        if v and "reasoning" in v:
+            validate_reasoning_config(v["reasoning"], allow_model=True)
         if v and v.get("by") and v["by"] == n.get("agent"):
             raise ValueError(f"{n['id']}: verifier must differ from author ({n['agent']!r})")
         # A verifier checks the criteria and nothing else, so a gate that states
@@ -655,9 +783,10 @@ def run_node(node, ctx, run_dir, log):
         prompt += (
             f"\n\n---\nFinally, if you established anything durable (a decision, a gotcha, a "
             f"constraint that will still matter next month), append one note under "
-            f"{(MEM / 'brain').as_posix()} following {(MEM / 'SCHEMA.md').as_posix()}. "
+            f"{(MEM / 'projects' / project_id() / 'brain').as_posix()} "
+            f"following {(MEM / 'SCHEMA.md').as_posix()}. "
             f"Frontmatter is mandatory: name (matching the filename), description, type, "
-            f"date, reach, and — when reach is repo — project: {WORK.name}. "
+            f"date, reach: repo, project_id: {project_id()}. "
             f"Skip this entirely if nothing durable came up."
         )
 
@@ -676,13 +805,27 @@ def run_node(node, ctx, run_dir, log):
         if issues:
             p += "\n\n---\n# A verifier rejected your previous attempt. Fix these:\n- " + "\n- ".join(issues)
         log(f"  {nid} [{agent}] round {r}/{rounds}")
-        out = run_agent(agent, p, nd, node.get("timeout"), node.get("sandbox"))
+        reasoning = (validate_reasoning_config(node["reasoning"], allow_model=True)
+                     if "reasoning" in node else {})
+        out = run_agent(agent, p, nd, timeout=node.get("timeout"),
+                        sandbox=node.get("sandbox"),
+                        effort=reasoning.get("effort", node.get("effort")),
+                        task_kind=reasoning.get("task_kind", node.get("task_kind")),
+                        reasoning_dimensions=reasoning.get("dimensions"),
+                        model=reasoning.get("model"),
+                        routing_task=task, cap=reasoning.get("cap"))
         if not verifier:
             return out
+        vr = (validate_reasoning_config(vcfg["reasoning"], allow_model=True)
+              if vcfg and "reasoning" in vcfg else {})
         vout = run_agent(verifier, VERIFY_TMPL.format(
             task=task, author=agent, output=out[:60000],
             criteria="\n".join(f"- {c}" for c in vcfg["criteria"]),
-        ), nd / "verify")
+        ), nd / "verify", effort=vr.get("effort"),
+                         task_kind=vr.get("task_kind", "review"),
+                         reasoning_dimensions=vr.get("dimensions"),
+                         model=vr.get("model"), routing_task=task,
+                         cap=vr.get("cap"))
         ok, issues = parse_verdict(vout)
         log(f"  {nid} verified by [{verifier}]: {'PASS' if ok else 'FAIL'} ({len(issues)} issues)")
         if ok:
@@ -800,14 +943,17 @@ def cmd_doctor(a):
 
 def cmd_ask(a):
     prompt = a.prompt if a.prompt != "-" else sys.stdin.read()
+    routing_task = prompt
     if a.memory:
         prompt = mem_context(prompt, CFG["memory_k"]) + prompt
     d = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-ask-{a.agent}"
-    print(run_agent(a.agent, prompt, d))
+    dimensions = load_reasoning_dimensions(a.reasoning)
+    print(run_agent(a.agent, prompt, d, effort=a.effort, task_kind=a.task_kind, reasoning_dimensions=dimensions, model=a.model, routing_task=routing_task))
 
 
 def cmd_review(a):
     """Cross-review: whoever wrote it does not review it."""
+    dimensions = load_reasoning_dimensions(a.reasoning)
     reviewer = a.by or pick_reviewer(a.author)
     if reviewer == a.author:
         sys.exit("refusing self-review")
@@ -821,7 +967,21 @@ def cmd_review(a):
     print(run_agent(reviewer, VERIFY_TMPL.format(
         task=a.task, author=a.author, output=target[:60000],
         criteria="\n".join(f"- {c}" for c in a.criteria),
-    ), d))
+    ), d, effort=a.effort, task_kind=a.task_kind or "review",
+       reasoning_dimensions=dimensions, model=a.model, routing_task=a.task))
+
+
+def load_reasoning_dimensions(value):
+    """Read the CLI's five-dimension JSON object from text or a file."""
+    if value is None:
+        return None
+    try:
+        path = Path(value)
+        raw = path.read_text(encoding="utf-8") if path.is_file() else value
+    except OSError:
+        raw = value
+    dimensions = json.loads(raw)
+    return validate_reasoning_config({"dimensions":dimensions})["dimensions"]
 
 
 def role_chain(roles, role):
@@ -921,6 +1081,10 @@ def main():
     p = sub.add_parser("ask", help="one-shot call to one agent")
     p.add_argument("agent"); p.add_argument("prompt", help="text, or - for stdin")
     p.add_argument("--memory", action="store_true", help="inject vault context")
+    p.add_argument("--effort", choices=["auto","low","medium","high","xhigh","max"], default="auto")
+    p.add_argument("--task-kind")
+    p.add_argument("--reasoning", help="JSON object or path to JSON dimensions")
+    p.add_argument("--model")
     p.set_defaults(fn=cmd_ask)
 
     p = sub.add_parser("review", help="cross-review (author is never the reviewer)")
@@ -932,6 +1096,10 @@ def main():
     # without them returns a vacuous PASS. Refuse rather than invent a default.
     p.add_argument("--criteria", action="append", required=True,
                    help="repeatable; what must hold. The gate checks these and nothing else")
+    p.add_argument("--effort", choices=["auto","low","medium","high","xhigh","max"], default="auto")
+    p.add_argument("--task-kind")
+    p.add_argument("--reasoning", help="JSON object or path with all five reasoning dimensions")
+    p.add_argument("--model")
     p.set_defaults(fn=cmd_review)
 
     p = sub.add_parser("init", help="record who fills each role on this machine")

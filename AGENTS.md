@@ -4,16 +4,17 @@ Canonical file. `CLAUDE.md` and `GEMINI.md` point here.
 
 ## Where you are
 
-A multi-agent harness. Three CLI agents (`claude`, `codex`, `agy`) are
-composed by `mam.py` into graphs. Shared long-term memory lives in `memory/`
-as plain markdown, tracked in git.
+A multi-agent harness. CLI agents configured in `agents.json` are composed
+by `mam.py` into graphs. Shared long-term memory lives at `MAM_MEMORY`
+(default: the repo's `memory/`); this installation uses `~/.mam-memory`.
+The repo's `memory/` also holds the schema and seed notes.
 
 ## Memory
 
-Before answering anything non-trivial, consult memory:
+Consult memory when previous decisions may help. Run from the actual project:
 
 ```bash
-python mam.py mem search "your topic"
+python "$env:MAM_HOME/mam.py" mem context "your topic" -k 3
 ```
 
 Graph nodes get relevant notes injected automatically — you may already see a
@@ -28,10 +29,10 @@ note**, not adding a second one.
 
 ## The one hard rule
 
-**You never verify or review your own output.** If you are asked to check work,
-you did not write it. If you notice you are being asked to grade your own
-artifact, stop and say so — `mam.py` is supposed to prevent this and a leak is
-a bug worth reporting.
+**Independent review must come from a different author.** Authors run their
+own tests as part of implementation; those tests are not independent review.
+Declare the actual author in `review_of` and `verify.by`. A new alias of the
+same author does not make a review independent.
 
 Corollary when you *are* the reviewer: read the actual files on disk. Do not
 review the author's summary of what they did. Report real defects only;
@@ -42,7 +43,7 @@ manufacturing findings to look thorough is worse than finding nothing.
 | you are | you do |
 |---|---|
 | `claude` | specs, architecture, judging, reconciling conflicting sources, final verdicts |
-| `codex`  | implementation, refactors, diffs, tests, anything that runs in a sandbox |
+| `codex-luna` | implementation, refactors, diffs, tests, anything that runs in a sandbox |
 | `agy`    | live web research, huge-document reading, visual/browser verification |
 
 Full rationale: `memory/brain/agent-routing.md`.
@@ -65,3 +66,5 @@ prevents data loss, security, accessibility, or anything explicitly requested.
   `false` when uncertain.
 - Never ask clarifying questions in a graph run. State the assumption and
   continue.
+
+Canary markers and retry routing follow `C:/Users/Dmitry/.agent-harness/rules/AGENTS.md`.

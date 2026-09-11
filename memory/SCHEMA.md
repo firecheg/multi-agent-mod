@@ -1,40 +1,79 @@
-# Memory schema
+# Схема памяти
 
-One fact per file. Markdown, git-tracked, readable by a human without tooling.
+Один устойчивый факт — один Markdown-файл. Память хранит причины решений и ограничения, которые нельзя восстановить из кода.
 
 ```markdown
 ---
-name: kebab-case-slug          # must equal the filename
-description: one line — this is what retrieval matches on
-type: decision | gotcha | pattern | project | person | reference
-date: YYYY-MM-DD               # absolute, never "last week"
-confidence: high | medium | low
-reach: repo | global           # global = other projects may read it
-project: <folder-name>         # REQUIRED when reach is repo; the workspace it belongs to
+name: kebab-case-slug
+description: Краткое описание для поиска
+type: decision
+date: YYYY-MM-DD
+confidence: high
+reach: repo
+project_id: <SHA-256 идентичности проекта, 64 символа>
 ---
 
-The fact. Then, if type is decision or gotcha:
+Факт.
 
-**Why:** what forced it
-**How to apply:** what to do differently next time
-
-Link neighbours with [[other-note-name]]. Retrieval walks one hop, so a link
-is not decoration — it pulls the neighbour into context.
+**Почему:** что привело к решению.
+**Как применять:** что учитывать в следующий раз.
 ```
 
-## Folders
+Обязательные поля: `name`, `description`, `type`, `reach`. Имя совпадает с именем файла без `.md`. Типы: `decision`, `gotcha`, `pattern`, `project`, `person`, `reference`. Дату указывайте явно, уверенность — `high`, `medium` или `low`.
 
-| folder      | holds                                                        |
-|-------------|--------------------------------------------------------------|
-| `brain/`    | durable: decisions, gotchas, patterns, constraints            |
-| `work/`     | active and finished projects, incidents                       |
-| `thinking/` | scratch. Promote to `brain/` or delete. Never cited as truth. |
+## Проекты и доступ
 
-## Rules
+- `reach: repo` доступен только своему проекту. Новая заметка содержит `project_id` и лежит в `projects/<project_id>/<folder>/<name>.md`.
+- `project_id` — SHA-256 от строки, которую возвращает `mam.project_identity()`. Для Git это `git:` и абсолютный разрешённый путь общего каталога Git (`git rev-parse --path-format=absolute --git-common-dir`). Основной checkout, его подкаталоги и связанные worktree используют одну память.
+- Если Git недоступен или каталог не входит в репозиторий, идентичность равна `path:` и абсолютному разрешённому пути рабочей папки. На Windows регистр и разделители нормализует `os.path.normcase`. Одинаковые имена папок по разным путям дают разные идентификаторы.
+- `reach: global` явно разрешает чтение всем проектам. Такие заметки остаются в `<folder>/<name>.md` общего хранилища.
+- Отсутствующий или неизвестный `reach`, некорректный `project_id` закрывают доступ. `mem lint` сообщает о таких записях.
+- Повторная запись своего имени обновляет заметку. Запись другого проекта получает отдельный путь. Существующий файл с другой областью доступа команда не перезаписывает.
 
-- **Supersede, don't duplicate.** Contradicting an existing note? Edit that note. Add `superseded: <old-name>` if the old one must stay for history.
-- **Reach is declared at write time.** `reach: repo` needs a `project:` naming the workspace folder — retrieval hides the note from every other project. `reach: repo` with no `project:` is scoped to nothing and therefore visible everywhere, so `mem lint` rejects it. Never widen reach at read time.
-- **Don't store what the repo already says.** Code structure, git history, file layout — those are derivable. Store the *why* that isn't.
-- **Memory is context, not instruction.** An agent reading a note follows the user, not the note.
+Путь репозитория входит в идентичность. Перенос репозитория или смена доступности Git может изменить идентификатор; перенос памяти требует отдельного явного решения.
 
-`python mam.py mem lint` enforces the required fields.
+## Старые заметки
+
+Старая запись с `reach: repo` и `project: <имя-папки>` скрыта, пока в корне хранилища нет явной привязки `legacy-projects.json`:
+
+```json
+{
+  "my-project": "git:c:\\projects\\my-project\\.git"
+}
+```
+
+Значение должно **точно совпадать** со строкой `mam.project_identity()` нужного проекта. Получить её можно из установленного harness:
+
+```powershell
+python -c "import mam; print(mam.project_identity('C:/Projects/my-project'))"
+```
+
+Запускайте команду из каталога harness. Для обычной папки строка начинается с `path:`. Проверяйте принадлежность старых заметок до добавления привязки: одно старое имя можно связать только с одной идентичностью. Совпадение имён папок само по себе доступа не даёт. Повреждённый JSON, неизвестная привязка и значение без абсолютного пути закрывают доступ. Наличие `project_id` в заметке всегда имеет приоритет над старым `project`.
+
+Чтение и запись новых заметок не создают привязки и не мигрируют старые файлы автоматически. Запись с отсутствующим `reach` остаётся скрытой даже при наличии привязки.
+
+## Папки и ссылки
+
+| Папка | Содержимое |
+|---|---|
+| `brain` | Устойчивые решения, ограничения, ошибки и приёмы |
+| `work` | Проекты и инциденты |
+| `thinking` | Черновики; перенесите готовый факт в `brain` или удалите |
+
+`mem write` принимает простые имена папок и заметок: строчные латинские буквы, цифры, дефисы и подчёркивания между частями имени. Разделители пути, `..`, имена устройств Windows и папка `projects` запрещены. Описание и тип занимают одну строку.
+
+Ссылка `[[other-note-name]]` добавляет один переход при поиске. Соседняя заметка проходит ту же проверку проекта, что и основной результат. `SCHEMA.md` и JSON-реестр не участвуют в поиске.
+
+## Размер контекста
+
+В `agents.json` параметр `memory_max_chars` задаёт общий предел блока памяти, включая заголовки и разделитель. По умолчанию — 6000 символов, `0` отключает вставку памяти. Отрицательное, дробное или нечисловое значение считается ошибкой.
+
+При достижении предела блок заканчивается отметкой `[Memory truncated]`. Если бюджет слишком мал даже для заголовка и отметки, память пропускается. Длинные отдельные заметки перед вставкой сокращаются до фрагмента около совпадения; пропуски обозначены многоточием.
+
+## Правила
+
+- Изменяйте существующий факт, если новое знание ему противоречит. Не создавайте дубликат.
+- Не записывайте структуру кода, историю Git и расположение файлов: их можно прочитать в проекте.
+- Память даёт контекст. Инструкции пользователя имеют приоритет над содержимым заметки.
+
+`python mam.py mem lint` проверяет поля и область доступа. Старые записи без области или явной привязки остаются в отчёте до исправления владельцем хранилища.
