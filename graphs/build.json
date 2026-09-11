@@ -1,42 +1,57 @@
 {
   "name": "build",
-  "_": "Linear graph with a verifier gate inside the build node (loop) and a cross-review node (graph). Author never reviews itself.",
-  "concurrency": 2,
+  "_": "Конвейер под три роли. claude ставит задачу и ведёт обвинение, codex-luna пишет весь код, codex-astra — второй ревьюер И защитник автора: он читает код read-only, тестов не гоняет, и разбирает находки claude по существу. Судит claude, видя обе стороны. agy/gemini не участвуют: region-blocked, см. _reviewers в agents.json.",
+  "concurrency": 1,
   "nodes": [
     {
       "id": "spec",
       "agent": "claude",
-      "prompt": "Write a tight implementation spec for this task. No code.\n\nTASK:\n{input}\n\nOutput: goal in one sentence; files to touch; the smallest design that works; explicit non-goals; 3-6 acceptance criteria that a skeptic could check against the actual diff."
+      "prompt": "Напиши тесную спеку под эту задачу. Кода не пиши.\n\nЗАДАЧА:\n{input}\n\nВыдай: цель одним предложением; файлы, которые надо тронуть; минимальный работающий дизайн; явные не-цели; 3-6 критериев приёмки, которые скептик может проверить по фактическому диффу. Критерии формулируй так, чтобы их можно было проверить ЧТЕНИЕМ кода, не только прогоном тестов."
     },
     {
       "id": "build",
-      "agent": "codex",
-      "needs": ["spec"],
+      "agent": "codex-luna",
+      "needs": [
+        "spec"
+      ],
       "remember": true,
       "verify": {
-        "by": "agy",
-        "max_rounds": 3,
+        "by": "codex-astra",
+        "max_rounds": 2,
         "criteria": [
-          "Every acceptance criterion in the spec is actually met by the code on disk",
-          "No stubs, TODOs, or placeholder returns on the happy path",
-          "Errors and edge cases at trust boundaries are handled",
-          "Nothing outside the spec's scope was changed"
+          "Каждый критерий приёмки из спеки реально выполнен кодом на диске",
+          "Нет заглушек, TODO и подставных возвратов на счастливом пути",
+          "Ошибки и границы доверия обработаны",
+          "Сверх спеки ничего не изменено"
         ]
       },
-      "prompt": "Implement this spec in the repo. Then report what you changed, file by file.\n\nSPEC:\n{spec}\n\nOriginal task for context:\n{input}"
+      "prompt": "Реализуй эту спеку в репозитории, затем отчитайся по файлам.\n\nСПЕКА:\n{spec}\n\nИсходная задача для контекста:\n{input}\n\nТы единственный, кто пишет код в этом конвейере. Тесты своего куска пиши и гоняй сам — ревьюеры их запускать не будут.\n\nДИСЦИПЛИНА ОБЪЁМА. Делай РОВНО просимое. Лестница: нужно ли это вообще -> есть ли уже в кодовой базе -> хватит ли колонки вместо таблицы и метода вместо сервиса -> можно ли одной строкой -> и только потом минимальный код. Запрещено: абстракция с единственной реализацией, фабрика ради одного объекта, конфиг под неизменное значение, леса «на будущее», поля и ручки, которых не просили. Сознательное упрощение помечай комментарием `ponytail:` с потолком и путём апгрейда. НЕ упрощай: проверки прав, валидацию на границе доверия, обработку ошибок с потерей данных.\n\nЭКОНОМИЯ КОНТЕКСТА. НЕ читай большие файлы целиком — ищи grep-ом и читай диапазонами строк вокруг находки. Пока итерируешь, гоняй только тесты своего куска, а не весь набор. Не пересказывай прочитанное, не дублируй диффы, не цитируй файлы целиком."
     },
     {
       "id": "review",
-      "agent": "agy",
-      "needs": ["build"],
+      "agent": "claude",
+      "needs": [
+        "build"
+      ],
       "review_of": "build",
-      "prompt": "Review this implementation as an adversarial reviewer. You did not write it.\n\nSPEC:\n{spec}\n\nAUTHOR'S REPORT:\n{build}\n\nRead the actual files on disk — do not trust the report. Find real defects only: correctness bugs, unhandled inputs, security issues, spec violations, needless complexity. For each: file:line, why it breaks, concrete fix. If you find nothing real, say so — do not manufacture findings."
+      "prompt": "Ты враждебный ревьюер. Этот код писал не ты.\n\nСПЕКА:\n{spec}\n\nОТЧЁТ АВТОРА:\n{build}\n\nЧитай фактические файлы на диске — отчёту не верь. Тесты гонять можно и нужно. Ищи только настоящие дефекты: ошибки корректности, необработанный ввод, дыры в безопасности, расхождения со спекой, лишнюю сложность, тесты, которые прошли бы и на сломанной реализации. По каждой находке: file:line, чем ломается, конкретная починка, и оценка серьёзности (блокер / важно / мелочь). Если настоящих находок нет — так и скажи, не выдумывай."
+    },
+    {
+      "id": "defense",
+      "agent": "codex-astra",
+      "needs": [
+        "review"
+      ],
+      "review_of": "build",
+      "prompt": "У тебя две роли сразу, и обе по одному и тому же коду. Писал его не ты.\n\nСПЕКА:\n{spec}\n\nОТЧЁТ АВТОРА:\n{build}\n\nРЕВЬЮ ОБВИНЕНИЯ (claude):\n{review}\n\nРЕГЛАМЕНТ. Тесты НЕ ЗАПУСКАЙ, даже если технически можешь: их уже прогнали автор и обвинение, а твой вклад — то, что прогон не показывает. Файлы не правь, песочница read-only. Твои токены идут на чтение кода, а не на ожидание pytest. Если поймал себя на мысли «надо бы прогнать» — вместо этого назови конкретный сценарий: какой вход, какая последовательность вызовов, какой результат ты ожидаешь и почему.\n\nРОЛЬ 1, ЗАЩИТНИК. Пройди по каждой находке обвинения и вынеси: СПРАВЕДЛИВО / ПРЕУВЕЛИЧЕНО / НЕВЕРНО. Для «неверно» покажи в коде, почему ревьюер ошибся — цитатой строки, а не рассуждением. Для «преувеличено» скажи, какова реальная цена дефекта. Защищай код там, где он прав, а не автора вообще: подтверждать настоящий баг — тоже твоя работа.\n\nРОЛЬ 2, ВТОРОЙ РЕВЬЮЕР. Добавь то, что обвинение пропустило. Смотри туда, куда прогон тестов не заглядывает: гонки, поведение при повторном вызове, границы транзакций, что случится при пустом и при огромном входе, скрытые связи с соседним кодом. По каждой находке: file:line, чем ломается, конкретная починка."
     },
     {
       "id": "judge",
       "agent": "claude",
-      "needs": ["review"],
-      "prompt": "You are the judge. Neither of the two agents below may overrule you, and you wrote neither artifact.\n\nSPEC:\n{spec}\n\nBUILD (codex):\n{build}\n\nREVIEW (agy):\n{review}\n\nFor each review finding decide: VALID (fix now) / MINOR (log it) / WRONG (reviewer erred — say why). Then give the verdict: SHIP or BLOCK, and if BLOCK, the exact remaining work as a numbered list."
+      "needs": [
+        "defense"
+      ],
+      "prompt": "Ты судья. Своё же ревью суди строже чужого — у обвинения и судьи здесь один агент, и защита существует именно как противовес.\n\nСПЕКА:\n{spec}\n\nОБВИНЕНИЕ (claude):\n{review}\n\nЗАЩИТА И ВТОРОЕ РЕВЬЮ (codex-astra):\n{defense}\n\nПо каждой находке обеих сторон: ПРИНЯТО (чинить сейчас) / В ЖУРНАЛ (мелочь) / ОТКЛОНЕНО (ревьюер ошибся — скажи, чем именно). Там, где защита оспорила обвинение, явно скажи, кто прав, и не отдавай спор себе по умолчанию. Затем вердикт: SHIP или BLOCK, и если BLOCK — точный остаток работы нумерованным списком. В конце: что человеку всё равно надо проверить руками."
     }
   ]
 }

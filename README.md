@@ -306,10 +306,62 @@ agent loads the same rules whichever filename it looks for.
 
 ---
 
+## Shared Codex / Claude installation
+
+The Windows installation uses one personal skill catalog at
+`~/.agent-harness/skills` and common instructions at
+`~/.agent-harness/rules/AGENTS.md`. Client skill directories contain junctions;
+native plugin caches and credentials remain managed by their own applications.
+`connections.json` records the common MCP and client-specific integrations.
+The current adapter configures `agent_harness`; it is not an automatic importer
+of arbitrary third-party MCP definitions.
+
+```powershell
+python -X utf8 "$env:MAM_HOME/execution/shared_harness.py" doctor
+python -X utf8 "$env:MAM_HOME/execution/shared_harness.py" add --source "C:/Users/Dmitry/.agent-harness/skills/example"
+python -X utf8 "$env:MAM_HOME/execution/specify_project.py" --project "C:/Programming/example"
+```
+
+The last command previews official Spec Kit files for both clients. Add
+`--apply` to install missing files; conflicting existing files stop the operation.
+Spec Kit 1.0.4 is required. Initialize each project when needed, not globally.
+
+Both clients expose MCP `agent_harness.research_batch`, `context_read`, `memory_search`, and
+`memory_write`. Always supply the absolute project directory. Memory uses
+`MAM_MEMORY`; repo notes are scoped by Git common-directory identity or absolute
+directory identity. Old basename-only notes require an explicit mapping in
+`legacy-projects.json`. No mapping means no retrieval into another project.
+
+Large-file summaries use Haiku; code questions in `research_batch` use Codex Luna.
+A registered Graphify index supplies a bounded query selection, then up to three
+workers answer at most six narrow questions. Each answer is capped at 1500
+characters. No automatic retry, costly fallback or recursive delegation occurs.
+Native worker launches disable shell tools and user plugins; existing login is
+reused without copying credentials. CLI metadata and usage remain visible.
+
+The common Read/Bash hook blocks recognized full reads over 350 lines; targeted
+reads remain available. Claude runs the registered hook. Codex also supports
+PreToolUse and has a user-level hooks.json entry; the user must first review and
+trust it through `/hooks`. Until trusted, Codex skips it. Arbitrary scripts and
+specialized tool paths are outside this small command recognizer's coverage.
+
+`indexes.json` in the shared root maps repository identity to a Graphify artifact
+and snapshot date/commit. `index_workers.py --project <absolute> --register-graph
+<absolute> --snapshot <date-and-commit>` registers one. Generate code-only indexes
+with Graphify CLI and keep them in the relevant project skill. Do not regenerate
+indexes merely because a question was asked.
+
+Migration and client-configuration snapshots live in `~/.agent-harness`.
+`shared_harness.py rollback` restores original client paths and managed fields,
+and refuses to overwrite changed managed configuration. Canonical skills and
+memory remain on disk. This is a configuration rollback, not a rollback of code
+changes, plugin upgrades or installed CLI packages.
+
 ## Check
 
 ```bash
 python test_mam.py
+python -X utf8 -m unittest test_mam test_shared_harness test_context_budget test_client_adapters test_integrations
 ```
 
 Covers the parts that rot silently: the no-self-review rule (static and

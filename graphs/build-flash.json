@@ -1,6 +1,6 @@
 {
   "name": "build-flash",
-  "_": "Same shape as build, with agy-flash implementing instead of codex. Flash is fast and cheap but not trusted on one pass, so the single in-node gate is followed by TWO independent reviews (claude and codex) that run in parallel, and claude rules on both. agy is deliberately not a reviewer here: same model family as the author is barely a second opinion.",
+  "_": "ЗАПАРКОВАН с 2026-09-06: agy-flash — это тот же бинарник Antigravity, что и agy, и он падает на региональной проверке ('not currently available in your location'). Граф не запускать, пока не выбран заменяющий дешёвый исполнитель: тогда достаточно поменять agent у узла build, остальная форма (один гейт + два независимых ревью + судья) остаётся верной. Same shape as build, with agy-flash implementing instead of codex. Flash is fast and cheap but not trusted on one pass, so the single in-node gate is followed by TWO independent reviews (claude and codex) that run in parallel, and claude rules on both. agy is deliberately not a reviewer here: same model family as the author is barely a second opinion.",
   "concurrency": 3,
   "nodes": [
     {

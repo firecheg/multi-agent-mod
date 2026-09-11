@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 .claude/
+.tmp/
+.pytest_cache/
+agents.local.json
