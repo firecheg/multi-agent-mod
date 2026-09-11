@@ -375,6 +375,7 @@ with tempfile.TemporaryDirectory() as td:
     except mam.AgentError as e:
         assert "wrote no out.md" in str(e), e
         assert "Not logged in" in str(e), "error must surface what the agent actually said"
+        assert json.loads((pathlib.Path(td) / "n/meta.json").read_text(encoding="utf-8"))["status"] == "failed"
 del mam.CFG["agents"]["_null"]
 
 # --- the agent must be told where its files are in absolute terms ----------
@@ -432,7 +433,8 @@ assert hits, "memory search found nothing"
 assert any(p.stem == "no-self-review" for p, _ in hits), [p.stem for p, _ in hits]
 assert "## Memory" in mam.mem_context("loop graph coordination", 2)
 assert mam.mem_search("zzzqqqxyzzy", 3) == []
-assert not mam.mem_lint(), mam.mem_lint()
+assert all(why in ("missing or invalid reach", "legacy project has no valid binding")
+           for _, why in mam.mem_lint()), mam.mem_lint()
 
 # short technical terms are exactly what a vault gets asked about
 assert {"ai", "go", "c#", "ml"} <= mam._terms("AI Go C# ML"), mam._terms("AI Go C# ML")
@@ -451,7 +453,7 @@ NODE = {"id": "b", "agent": "codex", "prompt": "do it", "memory": False,
 
 def _loop_agent(verdicts):
     calls = []
-    def fake(agent, prompt, node_dir, timeout=None, sandbox=None):
+    def fake(agent, prompt, node_dir, timeout=None, sandbox=None, **kwargs):
         calls.append((agent, prompt))
         if agent == "codex":
             return f"attempt {sum(1 for a, _ in calls if a == 'codex')}"
@@ -501,15 +503,251 @@ with contextlib.redirect_stdout(io.StringIO()) as out:
 assert "no credentials" in out.getvalue(), "probe failure was swallowed"
 mam.run_agent = _real_run_agent
 
-# --- reach: a repo-scoped note must not leak into a sibling project --------
-_fm = "---\nname: x\ndescription: d\ntype: gotcha\nreach: %s\n%s---\n\nbody"
-scoped = _fm % ("repo", "project: alpha\n")
-_w = mam.WORK
-mam.WORK = pathlib.Path("/x/alpha"); assert mam._in_reach(scoped), "hidden in its own project"
-mam.WORK = pathlib.Path("/x/beta"); assert not mam._in_reach(scoped), "leaked into a sibling"
-assert mam._in_reach(_fm % ("global", "")), "global must reach everywhere"
-assert mam._in_reach("no frontmatter at all"), "unmarked notes stay visible"
-mam.WORK = _w
+# --- Изоляция памяти: временное хранилище не затрагивает личные заметки. ---
+import unittest
+from unittest.mock import patch
+
+
+class MemoryIsolationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.temp.name)
+        self.vault = self.root / "vault"
+        self.vault.mkdir()
+        self.first = self.root / "first" / "same"
+        self.second = self.root / "second" / "same"
+        self.first.mkdir(parents=True)
+        self.second.mkdir(parents=True)
+        self.patches = [patch.object(mam, "MEM", self.vault),
+                        patch.object(mam, "WORK", self.first)]
+        for item in self.patches:
+            item.start()
+
+    def tearDown(self):
+        for item in reversed(self.patches):
+            item.stop()
+        self.temp.cleanup()
+
+    def note(self, scope, name="legacy"):
+        text = (f"---\nname: {name}\ndescription: d\ntype: gotcha\n"
+                f"{scope}---\n\nneedle secret")
+        p = self.vault / f"{name}.md"
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def write(self, name="shared", body="needle original", **kwargs):
+        return mam.mem_write("brain", name, "d", "gotcha", body, **kwargs)
+
+    def test_same_basename_is_isolated(self):
+        p = self.write()
+        self.assertTrue(mam.mem_search("needle"))
+        mam.WORK = self.second
+        self.assertFalse(mam.mem_search("needle"))
+        self.assertNotIn("original", mam.mem_context("needle"))
+
+    def test_same_slug_cannot_overwrite_another_project(self):
+        first = self.write()
+        mam.WORK = self.second
+        second = self.write(body="needle second")
+        self.assertNotEqual(first, second)
+        self.assertIn("original", first.read_text(encoding="utf-8"))
+        self.assertEqual(self.write(body="needle updated"), second)
+        self.assertIn("updated", second.read_text(encoding="utf-8"))
+        self.assertEqual(second.relative_to(self.vault).parts,
+                         ("projects", mam.project_id(), "brain", "shared.md"))
+        self.assertEqual(mam._meta(second.read_text(encoding="utf-8"))["project_id"],
+                         mam.project_id())
+
+    def test_unknown_and_missing_reach_are_hidden_and_linted(self):
+        for i, scope in enumerate(("", "reach: typo\n", "reach: repo\n")):
+            with self.subTest(scope=scope):
+                p = self.note(scope, str(i))
+                self.assertFalse(mam._in_reach(p.read_text(encoding="utf-8")))
+                self.assertTrue(any(n == p for n, _ in mam.mem_lint()))
+        self.assertFalse(mam._in_reach("no frontmatter"))
+        self.assertFalse(mam.mem_search("needle"))
+
+    def test_global_is_explicit_and_available_everywhere(self):
+        p = self.write(reach="global")
+        mam.WORK = self.second
+        self.assertEqual(mam.mem_search("needle")[0][0], p)
+        self.assertFalse(mam.mem_lint())
+
+    def test_legacy_requires_explicit_identity_binding(self):
+        p = self.note("reach: repo\nproject: same\n")
+        self.assertFalse(mam.mem_search("needle"))
+        self.assertTrue(mam.mem_lint())
+        (self.vault / "legacy-projects.json").write_text(
+            json.dumps({"same": mam.project_identity()}), encoding="utf-8")
+        self.assertEqual(mam.mem_search("needle")[0][0], p)
+        self.assertFalse(mam.mem_lint())
+        mam.WORK = self.second
+        self.assertFalse(mam.mem_search("needle"))
+
+    def test_invalid_registry_fails_closed(self):
+        self.note("reach: repo\nproject: same\n")
+        registry = self.vault / "legacy-projects.json"
+        for value in ("{", "[]", '{"same": null}', '{"same": "same"}'):
+            with self.subTest(value=value):
+                registry.write_text(value, encoding="utf-8")
+                self.assertFalse(mam.mem_search("needle"))
+                self.assertTrue(mam.mem_lint())
+
+    def test_invalid_project_id_cannot_fall_back_to_legacy(self):
+        (self.vault / "legacy-projects.json").write_text(
+            json.dumps({"same": mam.project_identity()}), encoding="utf-8")
+        for value in ("", " bad-id"):
+            with self.subTest(value=value):
+                self.note(f"reach: repo\nproject: same\nproject_id:{value}\n")
+                self.assertFalse(mam.mem_search("needle"))
+                self.assertTrue(mam.mem_lint())
+
+    def test_existing_scope_is_not_overwritten(self):
+        p = self.vault / "brain" / "shared.md"
+        p.parent.mkdir()
+        original = "---\nreach: repo\nproject: other\n---\n\noriginal"
+        p.write_text(original, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            self.write(reach="global")
+        self.assertEqual(p.read_text(encoding="utf-8"), original)
+
+    def test_wikilinks_do_not_pull_other_project_notes(self):
+        self.write("entry", "needle [[private]]")
+        mam.WORK = self.second
+        self.write("private", "hidden payload")
+        mam.WORK = self.first
+        self.assertEqual([p.stem for p, _ in mam.mem_search("needle")], ["entry"])
+        self.assertNotIn("hidden payload", mam.mem_context("needle"))
+
+    def test_paths_and_metadata_cannot_escape_namespace(self):
+        for folder, name in (("../outside", "x"), ("brain", "../x"),
+                             (str(self.root / "outside"), "x"), ("brain", "a/b"),
+                             ("..\\outside", "x"),
+                             ("projects", "x"), ("brain", "a:stream")):
+            with self.subTest(folder=folder, name=name):
+                with self.assertRaises(ValueError):
+                    mam.mem_write(folder, name, "d", "gotcha", "body")
+        with self.assertRaises(ValueError):
+            mam.mem_write("brain", "x", "d\nreach: global", "gotcha", "body")
+        with self.assertRaises(ValueError):
+            self.write(reach="typo")
+        self.assertEqual(list(self.vault.rglob("*.md")), [])
+
+    def test_total_context_budget_and_truncation(self):
+        for i in range(5):
+            self.write(f"note-{i}", "needle " + "large text " * 500)
+        with patch.dict(mam.CFG, {"memory_max_chars": 900}):
+            result = mam.mem_context("needle")
+        self.assertLessEqual(len(result), 900)
+        self.assertIn("needle", result)
+        self.assertIn("[Memory truncated]", result)
+        self.assertTrue(result.endswith("\n\n---\n\n"))
+        self.assertLessEqual(len(mam.mem_context("needle")), 6000)
+
+    def test_zero_budget_disables_context(self):
+        self.write()
+        with patch.dict(mam.CFG, {"memory_max_chars": 0}):
+            self.assertEqual(mam.mem_context("needle"), "")
+
+    def test_invalid_budget_is_rejected(self):
+        for value in (-1, 1.5, "900", True):
+            with self.subTest(value=value), patch.dict(mam.CFG, {"memory_max_chars": value}):
+                with self.assertRaises(ValueError):
+                    mam.mem_context("needle")
+
+    def test_git_worktree_and_subdirectory_share_project(self):
+        if not shutil.which("git"):
+            self.skipTest("git unavailable")
+        def git(*args):
+            subprocess.run(["git", *args], cwd=self.first, check=True,
+                           capture_output=True)
+        git("init", "-q")
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+            "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "test")
+        worktree = self.root / "worktree"
+        git("worktree", "add", "--detach", str(worktree))
+        first = self.write()
+        nested = self.first / "nested"
+        nested.mkdir()
+        for workspace in (nested, worktree):
+            mam.WORK = workspace
+            self.assertEqual(mam.mem_search("needle")[0][0], first)
+            self.assertEqual(self.write(body="needle updated"), first)
+
+    def test_small_note_is_not_marked_truncated(self):
+        self.write()
+        result = mam.mem_context("needle")
+        self.assertIn("original", result)
+        self.assertNotIn("[Memory truncated]", result)
+
+    def test_remember_prompt_uses_project_namespace(self):
+        with patch.object(mam, "run_agent", return_value="ok") as run:
+            mam.run_node({"id": "remember", "agent": "codex", "prompt": "x",
+                          "memory": False, "remember": True}, {}, self.root,
+                         lambda msg: None)
+        prompt = run.call_args.args[1]
+        self.assertIn((self.vault / "projects" / mam.project_id() / "brain").as_posix(), prompt)
+        self.assertIn(f"project_id: {mam.project_id()}", prompt)
+
+
+class ReasoningIntegrationTests(unittest.TestCase):
+    def test_run_agent_preserves_long_prompt_and_logs_actual_argv(self):
+        prompt = "full prompt " + "x" * 2200
+        spec = {"args":["exec", "-c", "model=gpt-5.5", "--model", "gpt-5.6-luna",
+                        "--output-last-message", "{out}", "{prompt}"]}
+        def completed(argv, **kwargs):
+            output = pathlib.Path(argv[argv.index("--output-last-message") + 1])
+            output.write_text("ok", encoding="utf-8")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        with tempfile.TemporaryDirectory() as td, \
+                patch.object(mam, "resolve", return_value=("codex.exe", spec)), \
+                patch.object(mam.subprocess, "run", side_effect=completed):
+            node = pathlib.Path(td) / "node"
+            result = mam.run_agent("codex-luna", prompt, node, model="gpt-6-astra",
+                                   task_kind="security", routing_task=prompt)
+            meta = json.loads((node / "meta.json").read_text(encoding="utf-8"))
+            self.assertEqual((node / "prompt.md").read_text(encoding="utf-8"), prompt)
+        self.assertEqual(result, "ok")
+        self.assertEqual(meta["reasoning"]["model"], "gpt-6-astra")
+        self.assertEqual(meta["reasoning"]["effective"], "high")
+        self.assertIn('model_reasoning_effort="high"', meta["argv"])
+        self.assertEqual(meta["argv"].count("--model"), 1)
+
+    def test_node_and_verifier_route_the_original_task_independently(self):
+        calls = []
+        def fake(agent, prompt, node_dir, *args, **kwargs):
+            calls.append((agent, prompt, kwargs))
+            return ('{"pass": true, "issues": []}' if agent == "agy" else "work")
+        node = {"id":"n", "agent":"codex", "prompt":"original task",
+                "memory":False, "task_kind":"security",
+                "verify":{"by":"agy", "criteria":["correct"]}}
+        with tempfile.TemporaryDirectory() as td, patch.object(mam, "run_agent", side_effect=fake):
+            self.assertEqual(mam.run_node(node, {}, pathlib.Path(td), lambda _:None), "work")
+        self.assertEqual(calls[0][2]["task_kind"], "security")
+        self.assertEqual(calls[0][2]["routing_task"], "original task")
+        self.assertEqual(calls[1][2]["task_kind"], "review")
+        self.assertEqual(calls[1][2]["routing_task"], "original task")
+
+    def test_invalid_graph_reasoning_fails_before_any_node(self):
+        spec = {"name":"invalid-reasoning", "nodes":[
+            {"id":"a", "agent":"codex", "prompt":"a"},
+            {"id":"b", "agent":"claude", "prompt":"b", "reasoning":False},
+        ]}
+        with patch.object(mam, "run_node") as run:
+            with self.assertRaises(ValueError):
+                mam.run_graph(spec, {}, quiet=True)
+            run.assert_not_called()
+
+    def test_cli_dimension_file_contract(self):
+        complete = {name:1 for name in mam.validate_reasoning_config(
+            {"dimensions":{"scope":1,"uncertainty":1,"reasoning_complexity":1,
+                           "risk":1,"verification_complexity":1}})["dimensions"]}
+        with tempfile.TemporaryDirectory() as td:
+            path = pathlib.Path(td) / "reasoning.json"
+            path.write_text(json.dumps(complete), encoding="utf-8")
+            self.assertEqual(mam.load_reasoning_dimensions(str(path)), complete)
+        with self.assertRaises(ValueError):
+            mam.load_reasoning_dimensions('{"scope": 1}')
 
 # --- scheduler: deps respected, independents run together -----------------
 order, spec = [], {"name": "sched", "concurrency": 4, "nodes": [
@@ -575,5 +813,15 @@ assert _p.returncode == 2, f"review ran without criteria: rc={_p.returncode}"
 assert "--criteria" in _p.stderr, _p.stderr
 # and it fails at parse time, before picking a reviewer or reading the diff
 assert "reviewed by" not in _p.stderr, "a model call was reached anyway"
+_help = subprocess.run([sys.executable, "mam.py", "review", "--help"],
+                       cwd=str(mam.HOME), capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
+assert _help.returncode == 0 and "--reasoning" in _help.stdout, _help.stdout + _help.stderr
 
+_suite = unittest.TestSuite()
+_suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(MemoryIsolationTests))
+_suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(ReasoningIntegrationTests))
+_result = unittest.TextTestRunner(verbosity=2).run(_suite)
+if not _result.wasSuccessful():
+    raise SystemExit(1)
 print("ok")

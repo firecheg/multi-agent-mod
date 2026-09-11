@@ -4,4 +4,6 @@ __pycache__/
 *.pyc
 .claude/
 roles.json
+.tmp/
+.pytest_cache/
 agents.local.json

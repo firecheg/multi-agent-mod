@@ -142,6 +142,7 @@ python "$MAM" graph research --input "..."      # web (agy) ∥ repo (codex) -> 
 python "$MAM" graph build --input "..."         # spec -> build+gate -> review -> judge
 python "$MAM" graph build-2r --input "..."      # same, read by two reviewers instead of one
 python "$MAM" graph court --input "..."         # (charge -> defence -> ruling -> fix) x3
+python "$MAM" graph build-flash --input "..."   # settled spec -> flash implementer + two reviewers
 python "$MAM" mem search "topic"
 python "$MAM" mem lint
 ```
@@ -180,6 +181,10 @@ graph's findings without reading what it actually returned.
   into design and correctness lenses that run in parallel, and the judge rules
   on both. Worth it when the implementer is cheap enough that a second reader
   still comes out ahead, or when a miss is expensive. Needs a `review_2` role.
+- **`graph build-flash`** when the spec is settled and the work is mechanical:
+  `agy-flash` implements, then Claude and Codex review independently. It is
+  cheaper per run while retaining two review lenses; use `build` for exploratory
+  or high-cost-of-error work.
 - **Custom graph** when neither fits: write JSON to a temp file and pass the
   path. Node fields: `id`, `agent`, `needs`, `prompt`, `verify {by,
   max_rounds, criteria}`, `review_of`, `remember`, `memory`, `sandbox`.
