@@ -266,8 +266,9 @@ correctness, then claude rules on both. Flash is cheap enough that paying for a
 second lens still comes out ahead; `agy` is deliberately not one of the two,
 since the same model family as the author is barely a second opinion.
 
-`graphs/research.json` — web (agy) ∥ repo (codex) in parallel → synthesis
-(claude).
+`graphs/research.json` — web (claude) ∥ repo (codex) in parallel → synthesis
+(claude); the web pass is explicitly marked non-independent in the graph because
+the region-blocked `agy` route is disabled.
 
 Graphs name **roles**, not agents — `spec`, `implement`, `review`, `judge`,
 `web`. Bind them to what you actually installed, once:
