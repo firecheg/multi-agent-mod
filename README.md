@@ -270,7 +270,8 @@ since the same model family as the author is barely a second opinion.
 (claude); the web pass is explicitly marked non-independent in the graph because
 the region-blocked `agy` route is disabled.
 
-`build-2r` and `court` name **roles** — `spec`, `implement`, `review`, `judge`.
+`build-2r` and `court` name **roles** — `spec`, `implement`, `review`, `judge`,
+plus `review_2` for `build-2r` and `prosecutor` for `court`.
 The current `build` and `research` graphs name agents directly. For graphs that
 use roles, bind them to what you actually installed, once:
 
