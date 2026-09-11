@@ -132,8 +132,7 @@ the author when no other agent is installed.
 
 It keys off *declared* metadata (`review_of`, `verify.by`). A node that
 quietly interpolates `{a}` and asks "check this" is **not** caught — declare
-the relationship. And when reviewing something **you** wrote in this session,
-the actual author: use `codex` for work written by Codex and `claude` for work
+the relationship. Declare the actual author: use `codex` for work written by Codex and `claude` for work
 written by Claude. Never hardcode the current author as Claude. Author-run tests
 are part of implementation; an independent reviewer must not have authored the
 artifact. A new alias of the same author is not independence.
@@ -171,7 +170,8 @@ graph's findings without reading what it actually returned.
 - **`graph research`** for questions needing both live web and local code.
   Read-only; safe default when unsure.
 - **`graph build`** for implementation you want gated. It *modifies the
-  repo* — confirm with the user before running it on their project.
+  repo* — run within the scope already authorized by the user; ask only when
+  the graph would expand that scope.
 - **`graph court`** when you want the author to answer for its work rather than
   have it silently rewritten. Nobody is assigned a part: the judge is whoever
   wrote the brief, the defence is whoever wrote the code, and the prosecutor is

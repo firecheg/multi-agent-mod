@@ -224,10 +224,10 @@ produced one.
 
 ## Graphs
 
-`graphs/build.json` — spec → build (gated by the reviewer in a loop, up to 3
-rounds) → adversarial review → judge. The judge wrote neither the code nor the
-review it rules on; the runner enforces that after roles are bound, so pointing
-two roles at one agent is caught rather than quietly accepted.
+`graphs/build.json` — Claude writes the spec, Codex Luna implements, and Codex
+Astra gates the implementation for up to two rounds. Claude reviews, Astra
+answers the findings and adds a second review, then Claude judges both. The
+judge also authored the first review; the graph makes that limitation explicit.
 
 `graphs/build-2r.json` — the same shape read twice: the review step splits into
 a design lens and a correctness lens that fan out in parallel (both read-only),
@@ -270,8 +270,9 @@ since the same model family as the author is barely a second opinion.
 (claude); the web pass is explicitly marked non-independent in the graph because
 the region-blocked `agy` route is disabled.
 
-Graphs name **roles**, not agents — `spec`, `implement`, `review`, `judge`,
-`web`. Bind them to what you actually installed, once:
+`build-2r` and `court` name **roles** — `spec`, `implement`, `review`, `judge`.
+The current `build` and `research` graphs name agents directly. For graphs that
+use roles, bind them to what you actually installed, once:
 
 ```bash
 python mam.py init --spec claude --implement codex --review agy
