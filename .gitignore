@@ -7,3 +7,12 @@ roles.json
 .tmp/
 .pytest_cache/
 agents.local.json
+
+# Only bundled, project-neutral graphs are tracked. Run-specific graphs belong
+# to the project that ran them: <project>/.mam/graphs/ (already ignored there).
+graphs/*.json
+!graphs/research.json
+!graphs/build.json
+!graphs/build-2r.json
+!graphs/build-flash.json
+!graphs/court.json

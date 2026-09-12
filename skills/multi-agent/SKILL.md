@@ -3,7 +3,7 @@ name: multi-agent
 description: "Route work across claude, codex (Luna/Astra) and agy CLI agents with author-independent review, verifier-gated graphs and a shared memory vault. Use for /multi-agent, cross-review, second opinions, risky changes that need an adversarial reviewer, or research needing both web and repo lenses."
 license: MIT
 metadata:
-  version: 1.11.0
+  version: 1.11.1
 ---
 
 # /multi-agent
@@ -198,8 +198,9 @@ graph's findings without reading what it actually returned.
   `agy-flash` implements, then Claude and Codex review independently. It is
   cheaper per run while retaining two review lenses; use `build` for exploratory
   or high-cost-of-error work.
-- **Custom graph** when neither fits: write JSON to a temp file and pass the
-  path. Node fields: `id`, `agent`, `needs`, `prompt`, `verify {by,
+- **Custom graph** when neither fits: write JSON to the project's
+  `.mam/graphs/` (or a temp file) and pass the path — never into the harness
+  clone's `graphs/`, which holds only bundled, project-neutral shapes. Node fields: `id`, `agent`, `needs`, `prompt`, `verify {by,
   max_rounds, criteria}`, `review_of`, `remember`, `memory`, `sandbox`.
   `rounds {nodes, until, max}` replaces agent and prompt with a block of nodes
   run in order, over and over, until the `until` node's answer ends in

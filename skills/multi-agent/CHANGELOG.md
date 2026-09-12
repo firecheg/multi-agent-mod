@@ -4,6 +4,8 @@ Semver in `metadata.version` of `SKILL.md`. The skill is linked into the skills
 directory from a clone, so `git pull` is the upgrade — bump the version in the
 same commit that changes behaviour, or nobody can tell which one they have.
 
+- **1.11.1** — custom graphs go to the project's `.mam/graphs/`, not the
+  harness clone; `.gitignore` tracks only the bundled graphs.
 - **1.11.0** — the skill matches the shipped roster and graphs: `codex-astra`
   is in the routing table, bundled graphs are marked agent- or role-based,
   `doctor` is for harness operations rather than every call, recall uses
