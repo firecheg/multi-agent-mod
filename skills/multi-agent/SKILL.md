@@ -1,9 +1,9 @@
 ---
 name: multi-agent
-description: "Route work across codex, agy (Antigravity) and claude as CLI agents, with cross-review that no agent can perform on its own output, a verifier-gated build loop, and a shared persistent memory vault. Use when the user asks for a multi-agent, cross-reviewed, second-opinion, or independently-verified approach; when a change is risky enough to want an adversarial reviewer from a different model; when research needs both live web and local-repo lenses; or when they type /multi-agent."
+description: "Route work across claude, codex (Luna/Astra) and agy CLI agents with author-independent review, verifier-gated graphs and a shared memory vault. Use for /multi-agent, cross-review, second opinions, risky changes that need an adversarial reviewer, or research needing both web and repo lenses."
 license: MIT
 metadata:
-  version: 1.10.0
+  version: 1.11.0
 ---
 
 # /multi-agent
@@ -32,7 +32,9 @@ Run every command **from the user's project directory**. The harness splits
 actually operate), so one install serves every repo. Run artifacts land in
 `.mam/` in the project; suggest gitignoring it once.
 
-## Start here, every time
+## Start here for a harness operation or graph run
+
+A single `ask` or `review` does not need it; it costs a call you then carry.
 
 ```bash
 python "$MAM" doctor
@@ -59,13 +61,15 @@ before acting on it.
 
 ## Cold start: who is on this machine
 
-Graphs name **roles** — `spec`, `implement`, `review`, `judge`, `web` — not
-agents. A clone ships shapes, not somebody's roster, so before the first graph
-run the roles have to be bound to the CLIs this user actually has.
+A graph node names either an **agent** or a **role** (`spec`, `implement`,
+`review`, `review_2`, `judge`, `prosecutor`, `web`). An installed agent name
+runs as is; a role has to be bound to the CLIs this user actually has. Of the
+bundled graphs, `research`, `build` and `build-flash` name agents directly;
+`build-2r` and `court` name roles.
 
-`doctor` says whether that has happened. When it prints `roles (none)`, do not
-guess a roster and do not run a graph: **ask the user**, one question, and then
-record their answer.
+`doctor` says whether roles are bound. When it prints `roles (none)`, do not
+guess a roster and do not run a role-based graph: **ask the user**, one
+question, and then record their answer.
 
 ```bash
 python "$MAM" init --spec claude --implement codex --review agy
@@ -115,14 +119,17 @@ is in play.
 |---|---|
 | strong-model spec, architecture, judging, reconciling sources, independent review, final verdict | `claude` |
 | implementation, refactors, tight diffs, author tests on settled work | `codex-luna` |
+| second reviewer and author's defence: reads code, never edits it or runs tests | `codex-astra` |
 | live web research, huge-document reading, browser/visual verification | `agy` |
 | implementation on a settled spec: mechanical edits, assets, routine refactors | `agy-flash` |
 
-Route by capability, not preference. The value is that three correlated
-models become partly independent when each does what it is better at and
-checks what it did not do.
+Route by capability, not preference. The value is that correlated models
+become partly independent when each does what it is better at and checks
+what it did not do. `agents.json` is the source of truth for the roster.
 
-Перед каждым запуском выбирай reasoning effort отдельно по сложности: механика — low, обычная инженерия — medium, сложная диагностика/ограничения/безопасность/конкурентность — high, исключительная архитектура/инцидент/миграция продданных — xhigh. Объём, длина файла и effort родителя не влияют; max требует явного разрешения пользователя или проекта. Учитывай capability провайдера и effective unset при unsupported/unknown; после нового факта пересматривай следующий вызов. Канарейка сообщает фактически переданный effort или unsupported.
+Choose reasoning effort per call by difficulty (`--effort`, default `auto`),
+not by size or the parent's effort; `max` needs explicit permission. Levels
+and canary reporting: [routing rules](../../docs/agent-rules/routing.md).
 
 ## The hard rule
 
@@ -142,12 +149,12 @@ artifact. A new alias of the same author is not independence.
 ```bash
 python "$MAM" ask codex "..." --memory          # one agent, vault context injected
 python "$MAM" review claude --path src/x.py     # author=claude -> reviewer is not claude
-python "$MAM" graph research --input "..."      # web (agy) ∥ repo (codex) -> synthesis (claude)
-python "$MAM" graph build --input "..."         # spec -> build+gate -> review -> judge
-python "$MAM" graph build-2r --input "..."      # same, read by two reviewers instead of one
-python "$MAM" graph court --input "..."         # (charge -> defence -> ruling -> fix) x3
-python "$MAM" graph build-flash --input "..."   # settled spec -> flash implementer + two reviewers
-python "$MAM" mem search "topic"
+python "$MAM" graph research --input "..."      # web (claude) ∥ repo (codex) -> synthesis (claude)
+python "$MAM" graph build --input "..."         # spec (claude) -> build (codex-luna, gated by codex-astra) -> review (claude) -> defence (codex-astra) -> judge (claude)
+python "$MAM" graph build-2r --input "..."      # role-based: build read by two reviewers instead of one
+python "$MAM" graph court --input "..."         # role-based: (charge -> defence -> ruling -> fix), up to 3 rounds
+python "$MAM" graph build-flash --input "..."   # settled spec -> agy-flash implements -> claude + codex review
+python "$MAM" mem context "topic" -k 3           # bounded recall; `mem search` only lists scored note paths
 python "$MAM" mem lint
 ```
 
@@ -181,7 +188,8 @@ graph's findings without reading what it actually returned.
   Nothing is edited before the ruling, so "that is what I asked for" arrives in
   time to save a rewrite; the judge is a reviewer as well as an arbiter, and
   being the only party holding the brief it is the only one that can charge for
-  something never built at all. Rounds running out is a failure, not a pass.
+  something never built at all. The bundled graph allows 3 rounds; rounds
+  running out is a failure, not a pass.
 - **`graph build-2r`** when one reader is not enough: the review step splits
   into design and correctness lenses that run in parallel, and the judge rules
   on both. Worth it when the implementer is cheap enough that a second reader
@@ -269,38 +277,4 @@ instead of reasoning about what it would have printed.
 
 ## Changelog
 
-Semver in `metadata.version` above. The skill is linked into the skills
-directory from a clone, so `git pull` is the upgrade — bump the version in the
-same commit that changes behaviour, or nobody can tell which one they have.
-
-- **1.10.0** — current-author routing, Codex Luna implementation, per-call
-  reasoning effort and bounded shared-harness context guidance are documented.
-- **1.9.0** — `rounds` blocks: several nodes repeat until one of them returns a
-  passing verdict. `graph court` is three parties arguing inside one.
-- **1.8.0** — `graph court`: the author defends its own work against a
-  prosecutor who wrote neither the brief nor the code, and the judge who wrote
-  the brief rules. A spec can declare roles that must not collapse.
-- **1.7.0** — a role takes a preference order, not one agent; the first
-  installed one wins. `--review-2` is now its own flag, and `--role NAME=a,b`
-  sets roles beyond the built-in ones.
-- **1.6.0** — `agents.local.json` holds what is true of one machine (binary
-  paths, extra models); the tracked roster stays pullable.
-- **1.5.0** — graphs name roles, not agents, and `init` binds them to whatever
-  the user has. Ask before assuming a roster. Adds `graph build-2r`.
-- **1.4.0** — a graph node's `verify` block must list `criteria`; the spec is
-  rejected at validation instead of running a gate that checks nothing.
-- **1.3.0** — a partial or blocked run must be reported as one, not as a pass.
-  And `review` now requires at least one `--criteria` and refuses the
-  run at parse time without it. Previously it substituted "Correct, minimal,
-  no obvious bugs.", which reads like a review and checks nothing: an
-  876-line diff came back `{"pass": true, "issues": []}` and the gate looked
-  like it had held.
-- **1.2.0** — codex is invoked with `--sandbox workspace-write` instead of
-  `--full-auto`, which codex 0.147 removed from `exec` (every build node died
-  with rc=2 before reaching the model). A per-node `sandbox` now replaces that
-  flag rather than appending a second one.
-- **1.1.0** — the memory vault can live outside the clone (`MAM_MEMORY`);
-  `doctor` prints which vault is live.
-- **1.0.0** — first public release. Routing table, the no-self-review rule,
-  `doctor` / `ask` / `review` / `graph` / `mem`, harness discovery via
-  `$MAM_HOME`.
+Version history and the bump rule: [CHANGELOG.md](CHANGELOG.md).
