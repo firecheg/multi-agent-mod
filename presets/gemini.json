@@ -1,0 +1,43 @@
+{
+  "name": "gemini",
+  "cli": "Gemini CLI",
+  "vendor": "google",
+  "detect": {
+    "paths": [],
+    "commands": [
+      "gemini"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "--output-format",
+      "json"
+    ],
+    "input": "stdin",
+    "output": "json_field",
+    "output_field": "response",
+    "model_args": [
+      "-m",
+      "{model}"
+    ],
+    "sandbox_args": [
+      "--approval-mode",
+      "{sandbox}"
+    ],
+    "default_sandbox": "auto_edit",
+    "timeout_seconds": 1800
+  },
+  "effort_levels": [],
+  "sandbox_modes": [
+    "default",
+    "auto_edit",
+    "yolo",
+    "plan"
+  ],
+  "checked": "Gemini CLI 0.53 `gemini --help`; https://geminicli.com/docs/cli/headless/ (not run live)",
+  "notes": "Runs headless when stdin is not a terminal; the piped stdin is the prompt. JSON output carries the answer in response. No reasoning-effort flag, so no effort is sent."
+}

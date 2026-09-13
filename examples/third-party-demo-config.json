@@ -1,0 +1,22 @@
+{
+  "timeout": 30,
+  "providers": {
+    "third-party": {
+      "argv": ["{python}", "{package_dir}/demo/offline_provider.py"],
+      "input": "stdin",
+      "output": "text",
+      "model_args": ["--model", "{model}"],
+      "effort_args": ["--effort", "{effort}"],
+      "models": {"default": {"supported_effort": ["low", "medium", "high"]}},
+      "default_model": "default",
+      "author_identity": "third-party-demo-author",
+      "timeout_seconds": 30
+    }
+  },
+  "agents": {
+    "third-worker": {"provider": "third-party", "model": "default", "role": "worker"},
+    "third-reviewer": {"provider": "third-party", "model": "default", "role": "reviewer", "author_identity": "third-party-demo-reviewer"}
+  },
+  "role_bindings": {"summary": "third-worker", "code": "third-worker", "context_read": "third-worker"},
+  "reviewers": {"third-worker": ["third-reviewer"]}
+}

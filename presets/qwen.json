@@ -1,0 +1,43 @@
+{
+  "name": "qwen",
+  "cli": "Qwen Code",
+  "vendor": "alibaba",
+  "detect": {
+    "paths": [],
+    "commands": [
+      "qwen"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "--output-format",
+      "text"
+    ],
+    "input": "stdin",
+    "output": "text",
+    "model_args": [
+      "--model",
+      "{model}"
+    ],
+    "sandbox_args": [
+      "--approval-mode",
+      "{sandbox}"
+    ],
+    "default_sandbox": "auto-edit",
+    "timeout_seconds": 1800
+  },
+  "effort_levels": [],
+  "sandbox_modes": [
+    "plan",
+    "default",
+    "auto-edit",
+    "auto",
+    "yolo"
+  ],
+  "checked": "https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/ (not run live)",
+  "notes": "Piped stdin is the prompt in non-interactive mode. Text output is used because --output-format json returns an array of messages rather than one object."
+}

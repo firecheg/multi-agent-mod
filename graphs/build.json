@@ -1,0 +1,49 @@
+{
+  "name": "build",
+  "_": "Spec, gated implementation, prosecution, defence, ruling. Roles: spec, implement, judge. Reviewers are relative to whoever actually implemented: reviewer:1 is the primary (see review_policy), reviewer:2 the second reader, who also gates each attempt and defends the code on its merits. Needs two independent reviewers configured for every implementer.",
+  "concurrency": 1,
+  "nodes": [
+    {
+      "id": "spec",
+      "agent": "spec",
+      "prompt": "Write a tight implementation spec for this task. No code.\n\nTASK:\n{input}\n\nOutput: goal in one sentence; files to touch; the smallest design that works; explicit non-goals; 3-6 acceptance criteria that a skeptic can check against the actual diff. Phrase criteria so they can be checked by READING the code, not only by running tests."
+    },
+    {
+      "id": "build",
+      "agent": "implement",
+      "needs": ["spec"],
+      "remember": true,
+      "verify": {
+        "by": "reviewer:2",
+        "max_rounds": 2,
+        "criteria": [
+          "Every acceptance criterion in the spec is actually met by the code on disk",
+          "No stubs, TODOs, or placeholder returns on the happy path",
+          "Errors and trust boundaries are handled",
+          "Nothing outside the spec's scope was changed"
+        ]
+      },
+      "prompt": "Implement this spec in the repository, then report what you changed, file by file.\n\nSPEC:\n{spec}\n\nOriginal task for context:\n{input}\n\nYou are the only author in this pipeline. Write and run the tests for your change yourself; the reviewers will not run them for you.\n\nSCOPE. Do exactly what was asked. Before writing code ask, in order: does this need to exist; does the codebase already have it; would a smaller construct do; can it be one line. No single-implementation abstractions, no factories for one product, no configuration for values that never change, no scaffolding for later. Mark a deliberate simplification with a comment naming its ceiling. Never simplify away permission checks, validation at trust boundaries, or error handling that prevents data loss.\n\nCONTEXT. Do not read large files whole: search, then read line ranges around the match. While iterating, run only the tests for your change. Do not restate what you read or paste whole files into your report."
+    },
+    {
+      "id": "review",
+      "agent": "reviewer:1",
+      "needs": ["build"],
+      "review_of": "build",
+      "prompt": "You are the adversarial reviewer. You did not write this code.\n\nSPEC:\n{spec}\n\nAUTHOR'S REPORT:\n{build}\n\nRead the actual files on disk; do not trust the report. Run tests where that helps. Look only for real defects: correctness errors, unhandled input, security holes, divergence from the spec, needless complexity, tests that would pass against a broken implementation. For each finding: file:line, how it breaks, a concrete fix, and severity (blocker / important / minor). If there are no real findings, say so; do not manufacture them."
+    },
+    {
+      "id": "defense",
+      "agent": "reviewer:2",
+      "needs": ["review"],
+      "review_of": "build",
+      "prompt": "You have two roles on the same code. You did not write it.\n\nSPEC:\n{spec}\n\nAUTHOR'S REPORT:\n{build}\n\nPROSECUTION REVIEW:\n{review}\n\nDo not run tests and do not edit files: the author and the prosecution already ran them, and your value is what a test run does not show. Where you would want to run something, name the concrete scenario instead: the input, the call sequence, the result you expect and why.\n\nROLE 1, DEFENCE. Rule on every prosecution finding: FAIR / OVERSTATED / WRONG. For WRONG, show in the code why the reviewer erred, quoting the line. For OVERSTATED, state the real cost. Defend the code where it is right, not the author in general; confirming a real bug is part of the job.\n\nROLE 2, SECOND REVIEWER. Add what the prosecution missed, where tests do not look: races, repeated calls, transaction boundaries, empty and huge inputs, hidden coupling with neighbouring code. For each finding: file:line, how it breaks, a concrete fix."
+    },
+    {
+      "id": "judge",
+      "agent": "judge",
+      "needs": ["defense"],
+      "prompt": "You are the judge.\n\nSPEC:\n{spec}\n\nPROSECUTION:\n{review}\n\nDEFENCE AND SECOND REVIEW:\n{defense}\n\nFor every finding from both sides: ACCEPTED (fix now) / LOGGED (minor) / REJECTED (the reviewer erred; say how). Where the defence contested the prosecution, say explicitly who is right. Attribute defects to their source: a flaw that came from the spec belongs to the spec. Then the verdict: SHIP or BLOCK, and for BLOCK the exact remaining work as a numbered list. End with what a human still has to check by hand."
+    }
+  ]
+}

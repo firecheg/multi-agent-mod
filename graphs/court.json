@@ -1,0 +1,62 @@
+{
+  "name": "court",
+  "_": "Three parties argue until the judge is satisfied. Parts are not configured, they follow from what each agent did: the judge wrote the brief, the defence wrote the code, the prosecutor did neither — hence `distinct`. Every round is charge, answer, ruling, fix, and the judge sits in the middle of it: it rules on the dispute before anything is edited, so 'that is what I asked for' arrives in time to save a rewrite, and it charges in its own right, because it is the only party holding the brief and an adversarial exchange is blind to what was never built. The round ends when the judge's verdict parses as pass; the rounds running out is a node failure, not a pass. Roles: spec (judge), implement (defence), prosecutor; all three must be distinct authors.",
+  "concurrency": 1,
+  "distinct": [
+    [
+      "spec",
+      "implement",
+      "prosecutor"
+    ]
+  ],
+  "nodes": [
+    {
+      "id": "brief",
+      "agent": "spec",
+      "prompt": "Write a tight implementation spec for this task. No code.\n\nTASK:\n{input}\n\nOutput: goal in one sentence; files to touch; the smallest design that works; explicit non-goals; 3-6 acceptance criteria that a skeptic could check against the actual diff. You will be ruling on the result against these, so write criteria you would be willing to judge."
+    },
+    {
+      "id": "build",
+      "agent": "implement",
+      "needs": [
+        "brief"
+      ],
+      "prompt": "Implement this spec in the repo. Then report what you changed, file by file.\n\nSPEC:\n{brief}\n\nOriginal task for context:\n{input}"
+    },
+    {
+      "id": "trial",
+      "needs": [
+        "build"
+      ],
+      "rounds": {
+        "max": 3,
+        "until": "ruling",
+        "nodes": [
+          {
+            "id": "charge",
+            "agent": "prosecutor",
+            "review_of": "build",
+            "prompt": "You are the PROSECUTOR, round {round}. You wrote neither this brief nor this code.\n\nBRIEF:\n{brief}\n\nAUTHOR'S ORIGINAL REPORT:\n{build}\n\nLAST ROUND:\n{previous}\n\nRead the files on disk as they are NOW — do not trust any report, and do not re-file a charge the judge dismissed last round. If the author fixed something and broke something else, that is a new charge and it is yours to find.\n\nCharge only what you can point at: acceptance criteria the code does not meet, correctness bugs, unhandled inputs, races, security issues, tests that would pass against a broken implementation, conventions of the surrounding code that this breaks.\n\nNumber every charge: file:line, what is wrong, the input or situation that exposes it, how serious. One defect per charge. Do not manufacture charges — an empty indictment is a valid outcome and the fastest way to end this."
+          },
+          {
+            "id": "defence",
+            "agent": "implement",
+            "prompt": "You are the DEFENCE, round {round}, and you wrote this code. Answer the indictment — **make no edits to any file**, this round is argument only.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nLAST ROUND:\n{previous}\n\nRead the code yourself before answering; the prosecutor may have misread it. Answer every charge with exactly one of:\n\n- VALID — the defect is real. Say so plainly and add anything the prosecutor missed about its blast radius.\n- NOT A DEFECT — with the reason: the path is unreachable, the input is validated upstream, the convention it names is not the convention here, the prosecutor misread the control flow. Point at the evidence.\n- THE BRIEF ASKED FOR THIS — quote the line of the brief. The judge wrote it and will settle whether you read it right.\n\nConceding a charge is not losing. A defence that fights every point tells the judge nothing."
+          },
+          {
+            "id": "ruling",
+            "agent": "spec",
+            "review_of": "build",
+            "prompt": "You are the JUDGE, round {round}. You wrote the brief this work is measured against, you wrote neither the code nor the indictment, and you are also a reviewer in your own right.\n\nBRIEF:\n{brief}\n\nINDICTMENT:\n{charge}\n\nDEFENCE:\n{defence}\n\nLAST ROUND:\n{previous}\n\nNothing has been edited this round. What you uphold is what gets fixed; what you dismiss stays as it is. Read the code yourself rather than scoring the argument.\n\nRule on each charge by number:\n\n- UPHELD — real and in scope.\n- DISMISSED — the defence is right, or your brief asked for exactly this. Say which. When the answer is 'I specified that', say it plainly: the prosecutor is reading your brief for the first time and the author should not pay for that.\n- NOTED — real, outside the brief. Log it, do not order it.\n\nThen add what neither side raised. You are the only party holding the brief: name any acceptance criterion the code does not meet that the indictment never mentioned, and charge it yourself. Attribute honestly — a defect that came from your brief is yours.\n\nEnd your answer with nothing but this JSON:\n{{\"pass\": true|false, \"issues\": [\"one line per item of the work order\"]}}\n\npass is true only when the work order is empty: every charge dismissed or already fixed, and every acceptance criterion met. Default to false when uncertain — you get another round, and shipping something you have not checked is the more expensive mistake."
+          },
+          {
+            "id": "fix",
+            "agent": "implement",
+            "remember": true,
+            "prompt": "Carry out the work order, and nothing else.\n\nBRIEF:\n{brief}\n\nYOUR DEFENCE:\n{defence}\n\nRULING AND WORK ORDER:\n{ruling}\n\nDo the items the judge upheld plus anything it added itself. Leave dismissed charges alone even where you conceded them — the judge holds the brief and has ruled the code right, and re-litigating that with an edit wastes the ruling.\n\nThen report, item by item, what you changed and where. The prosecutor reads the result next round and gets to charge again, including anything this fix broke. If an item cannot be done without going outside the brief, say so and leave it rather than widening the change to fit."
+          }
+        ]
+      }
+    }
+  ]
+}

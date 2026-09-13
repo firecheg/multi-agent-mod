@@ -1,0 +1,24 @@
+{
+  "name": "research",
+  "_": "Fan-out / join. Two independent lenses run in parallel (live web vs. this repository), then one synthesis node reconciles them. Read-only. Roles: web, implement (repository reading), spec (synthesis). If web and spec bind to the same agent, the synthesis is reconciling its own pass and is not independent; bind web to a third agent where you can.",
+  "concurrency": 3,
+  "nodes": [
+    {
+      "id": "web",
+      "agent": "web",
+      "prompt": "Research this on the live web. Prefer primary sources (official docs, source repositories, release notes) over blog summaries.\n\nQUESTION:\n{input}\n\nOutput: findings as claims, each with the URL that supports it, each marked [confirmed] or [uncertain]. Note explicitly what you could NOT verify."
+    },
+    {
+      "id": "local",
+      "agent": "implement",
+      "prompt": "Answer this from THIS repository only: code, configuration, git history. Do not use outside knowledge and do not edit files.\n\nQUESTION:\n{input}\n\nOutput: what the codebase actually does today, with file:line citations. State plainly where the repository is silent."
+    },
+    {
+      "id": "synth",
+      "agent": "spec",
+      "needs": ["web", "local"],
+      "remember": true,
+      "prompt": "Reconcile two research passes.\n\nQUESTION:\n{input}\n\nWEB:\n{web}\n\nREPOSITORY:\n{local}\n\nWhere they agree, state it once. Where they conflict, name the conflict and say which source wins and why. Where both are silent, say so; do not fill the gap from your own priors. If one of these passes was produced by you, read it as someone else's work and be stricter with it. End with the answer to the question and the one thing most worth verifying next."
+    }
+  ]
+}

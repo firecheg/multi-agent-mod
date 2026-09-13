@@ -1,0 +1,58 @@
+{
+  "name": "claude-deepseek",
+  "cli": "Claude Code with DeepSeek",
+  "vendor": "deepseek",
+  "detect": {
+    "paths": [
+      "~/.local/bin/claude.exe",
+      "~/.local/bin/claude"
+    ],
+    "commands": [
+      "claude"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "-p",
+      "--output-format",
+      "json",
+      "--no-session-persistence"
+    ],
+    "input": "stdin",
+    "output": "json",
+    "model_args": [
+      "--model",
+      "{model}"
+    ],
+    "sandbox_args": [
+      "--permission-mode",
+      "{sandbox}"
+    ],
+    "default_sandbox": "acceptEdits",
+    "timeout_seconds": 1800,
+    "env": {
+      "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+      "ANTHROPIC_AUTH_TOKEN": "${DEEPSEEK_API_KEY}",
+      "ANTHROPIC_API_KEY": "",
+      "ANTHROPIC_MODEL": "{model}",
+      "ANTHROPIC_DEFAULT_OPUS_MODEL": "{model}",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL": "{model}",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL": "{model}",
+      "CLAUDE_CODE_SUBAGENT_MODEL": "{model}"
+    }
+  },
+  "effort_levels": [],
+  "sandbox_modes": [
+    "acceptEdits",
+    "auto",
+    "bypassPermissions",
+    "manual",
+    "plan"
+  ],
+  "checked": "https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/ (endpoint; not run live)",
+  "notes": "Claude Code pointed at DeepSeek's Anthropic-compatible endpoint. Set DEEPSEEK_API_KEY in your environment (or override the reference in answers with env); the harness copies it into ANTHROPIC_AUTH_TOKEN for this provider only and clears an inherited ANTHROPIC_API_KEY. Use the vendor's model id as the model. No effort flag is sent, because the backend's support for it is unknown. Counts as its own provider for review_policy, separate from Anthropic. Regional endpoints differ; override ANTHROPIC_BASE_URL in answers if yours does."
+}

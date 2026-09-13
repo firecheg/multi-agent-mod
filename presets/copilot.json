@@ -1,0 +1,35 @@
+{
+  "name": "copilot",
+  "cli": "GitHub Copilot CLI",
+  "vendor": "github",
+  "detect": {
+    "paths": [],
+    "commands": [
+      "copilot"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "--prompt",
+      "Read the task in {prompt_file} and carry it out. End with your final answer.",
+      "--silent",
+      "--no-ask-user",
+      "--allow-all-tools"
+    ],
+    "input": "file",
+    "output": "text",
+    "model_args": [
+      "--model",
+      "{model}"
+    ],
+    "timeout_seconds": 1800
+  },
+  "effort_levels": [],
+  "sandbox_modes": [],
+  "checked": "https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference (not run live)",
+  "notes": "Programmatic mode takes the prompt as an argument, so the harness passes a prompt file. --silent prints only the agent's response. --allow-all-tools grants every tool without asking: narrow it with --allow-tool / --deny-tool where a node should not run commands. Authentication comes from the CLI sign-in or COPILOT_GITHUB_TOKEN / GH_TOKEN."
+}

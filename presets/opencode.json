@@ -1,0 +1,35 @@
+{
+  "name": "opencode",
+  "cli": "OpenCode",
+  "vendor": "opencode",
+  "detect": {
+    "paths": [],
+    "commands": [
+      "opencode"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "run",
+      "--auto",
+      "--file",
+      "{prompt_file}",
+      "Carry out the task described in the attached file. End with your final answer."
+    ],
+    "input": "file",
+    "output": "text",
+    "model_args": [
+      "--model",
+      "{model}"
+    ],
+    "timeout_seconds": 1800
+  },
+  "effort_levels": [],
+  "sandbox_modes": [],
+  "checked": "https://opencode.ai/docs/cli/ (not run live)",
+  "notes": "Model is provider/model, e.g. anthropic/<model> or deepseek/<model>; OpenCode itself reaches DeepSeek, GLM, Kimi, Qwen and local models. --auto approves permissions that are not explicitly denied. Default output is formatted text and may include tool progress; --format json is an event stream the harness does not parse. Reasoning variants are provider-specific, so no effort flag is sent."
+}

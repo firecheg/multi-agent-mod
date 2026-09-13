@@ -1,0 +1,26 @@
+{
+  "memory_k": 5,
+  "memory_max_chars": 6000,
+  "timeout": 30,
+  "providers": {
+    "demo": {
+      "argv": ["{python}", "{package_dir}/demo/offline_provider.py"],
+      "input": "stdin",
+      "output": "text",
+      "model_args": ["--model", "{model}"],
+      "effort_args": ["--effort", "{effort}"],
+      "models": {
+        "demo": {"supported_effort": ["low", "medium", "high", "xhigh", "max"]}
+      },
+      "default_model": "demo",
+      "author_identity": "agent-harness-demo",
+      "timeout_seconds": 30
+    }
+  },
+  "agents": {
+    "demo-worker": {"provider": "demo", "model": "demo", "role": "worker", "description": "Offline deterministic demonstration worker"},
+    "demo-reviewer": {"provider": "demo", "model": "demo", "role": "reviewer", "description": "Offline deterministic demonstration reviewer", "author_identity": "agent-harness-demo-reviewer"}
+  },
+  "role_bindings": {"summary": "demo-worker", "code": "demo-worker", "context_read": "demo-worker"},
+  "reviewers": {"demo-worker": ["demo-reviewer"], "demo-reviewer": ["demo-worker"]}
+}

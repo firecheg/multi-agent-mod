@@ -1,0 +1,54 @@
+{
+  "name": "agy",
+  "cli": "Google Antigravity CLI",
+  "vendor": "google",
+  "detect": {
+    "paths": [
+      "~/AppData/Local/agy/bin/agy.exe"
+    ],
+    "commands": [
+      "agy"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "--print",
+      "Read the task in {prompt_file} and carry it out. End with your final answer.",
+      "--output-format",
+      "text",
+      "--print-timeout",
+      "30m"
+    ],
+    "input": "file",
+    "output": "text",
+    "model_args": [
+      "--model",
+      "{model}"
+    ],
+    "effort_args": [
+      "--effort",
+      "{effort}"
+    ],
+    "sandbox_args": [
+      "--mode",
+      "{sandbox}"
+    ],
+    "default_sandbox": "accept-edits",
+    "timeout_seconds": 1800
+  },
+  "effort_levels": [
+    "low",
+    "medium",
+    "high"
+  ],
+  "sandbox_modes": [
+    "accept-edits",
+    "plan"
+  ],
+  "checked": "agy 1.1.27 `agy --help`; https://antigravity.google/docs/cli/headless/ (not run live)",
+  "notes": "Print mode takes the prompt as an argument, so the harness writes it to a file and passes the path. Upstream reports print mode hanging or dropping stdout without a TTY (google-antigravity/antigravity-cli issues 76 and 318) and the service is not available in every region; verify with doctor --deep before relying on it. The provider timeout ends a hung run."
+}

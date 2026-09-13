@@ -1,0 +1,24 @@
+{
+  "timeout": 60,
+  "providers": {
+    "third-party": {
+      "argv": ["python", "path/to/your-worker.py"],
+      "input": "stdin",
+      "output": "json_field",
+      "output_field": "answer",
+      "model_args": ["--model", "{model}"],
+      "effort_args": ["--reasoning", "{effort}"],
+      "models": {
+        "default": {"supported_effort": ["low", "medium", "high"]}
+      },
+      "default_model": "default",
+      "author_identity": "your-provider-team",
+      "timeout_seconds": 60
+    }
+  },
+  "agents": {
+    "third-party-worker": {"provider": "third-party", "model": "default", "role": "worker"},
+    "third-party-reviewer": {"provider": "third-party", "model": "default", "role": "reviewer", "author_identity": "your-independent-reviewer"}
+  },
+  "reviewers": {"third-party-worker": ["third-party-reviewer"]}
+}

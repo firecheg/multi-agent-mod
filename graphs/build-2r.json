@@ -1,0 +1,49 @@
+{
+  "name": "build-2r",
+  "_": "Same start as build, but the review splits into two independent lenses that run in parallel (both read-only), and the judge rules on both. Roles: spec, implement, judge. reviewer:1 gates each attempt and owns the design lens; reviewer:2 owns the correctness lens. Worth it when the implementer is cheap enough that a second reader still comes out ahead, or when a miss is expensive.",
+  "concurrency": 3,
+  "nodes": [
+    {
+      "id": "spec",
+      "agent": "spec",
+      "prompt": "Write a tight implementation spec for this task. No code.\n\nTASK:\n{input}\n\nOutput: goal in one sentence; files to touch; the smallest design that works; explicit non-goals; 3-6 acceptance criteria that a skeptic could check against the actual diff."
+    },
+    {
+      "id": "build",
+      "agent": "implement",
+      "needs": ["spec"],
+      "remember": true,
+      "verify": {
+        "by": "reviewer:1",
+        "max_rounds": 3,
+        "criteria": [
+          "Every acceptance criterion in the spec is actually met by the code on disk",
+          "No stubs, TODOs, or placeholder returns on the happy path",
+          "Errors and edge cases at trust boundaries are handled",
+          "Nothing outside the spec's scope was changed"
+        ]
+      },
+      "prompt": "Implement this spec in the repo. Then report what you changed, file by file.\n\nSPEC:\n{spec}\n\nOriginal task for context:\n{input}"
+    },
+    {
+      "id": "review_design",
+      "agent": "reviewer:1",
+      "needs": ["build"],
+      "review_of": "build",
+      "prompt": "Review this implementation as an adversarial reviewer. You did not write it.\n\nSPEC:\n{spec}\n\nAUTHOR'S REPORT:\n{build}\n\nRead the actual files on disk; do not trust the report. You own the DESIGN lens: does the change fit the codebase, follow the conventions of the code around it, and solve the problem the spec states rather than one next to it? Name needless complexity and scope creep. For each finding: file:line, why it is wrong, concrete fix. If you find nothing real, say so; do not manufacture findings."
+    },
+    {
+      "id": "review_correctness",
+      "agent": "reviewer:2",
+      "needs": ["build"],
+      "review_of": "build",
+      "prompt": "Review this implementation as an adversarial reviewer. You did not write it.\n\nSPEC:\n{spec}\n\nAUTHOR'S REPORT:\n{build}\n\nRead the actual files on disk; do not trust the report. You own the CORRECTNESS lens: run what can be run. Wrong results, unhandled inputs, races, security issues, tests that would pass against a broken implementation. For each finding: file:line, the input that breaks it, concrete fix. If you find nothing real, say so; do not manufacture findings."
+    },
+    {
+      "id": "judge",
+      "agent": "judge",
+      "needs": ["review_design", "review_correctness"],
+      "prompt": "Rule on two independent reviews of work you did not write.\n\nSPEC:\n{spec}\n\nDESIGN REVIEW:\n{review_design}\n\nCORRECTNESS REVIEW:\n{review_correctness}\n\nFor each finding: VALID (fix now) / MINOR (log) / WRONG (the reviewer erred; say why). Where the two disagree, say which wins and why. Then state whether the change ships as-is, and list what a human still has to check. Attribute defects to the author that caused them: a flaw that came from the spec is not the implementer's."
+    }
+  ]
+}

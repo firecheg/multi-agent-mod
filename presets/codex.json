@@ -1,0 +1,54 @@
+{
+  "name": "codex",
+  "cli": "OpenAI Codex CLI",
+  "vendor": "openai",
+  "detect": {
+    "paths": [
+      "~/AppData/Local/OpenAI/Codex/bin/*/codex.exe"
+    ],
+    "commands": [
+      "codex"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "exec",
+      "--skip-git-repo-check",
+      "--color",
+      "never"
+    ],
+    "input": "stdin",
+    "output": "text",
+    "model_args": [
+      "-m",
+      "{model}"
+    ],
+    "effort_args": [
+      "-c",
+      "model_reasoning_effort=\"{effort}\""
+    ],
+    "sandbox_args": [
+      "-s",
+      "{sandbox}"
+    ],
+    "default_sandbox": "workspace-write",
+    "timeout_seconds": 1800
+  },
+  "effort_levels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
+  "sandbox_modes": [
+    "read-only",
+    "workspace-write",
+    "danger-full-access"
+  ],
+  "checked": "codex-cli 0.154 `codex exec --help`; https://developers.openai.com/codex/noninteractive; one-shot call run live 2026-09-13",
+  "notes": "Instructions are read from stdin when no prompt argument is given. Progress goes to stderr; stdout carries only the final agent message. workspace-write has no network; use danger-full-access per node only where a task needs it. Add \"max\" to a model's supported_effort if your model accepts it."
+}

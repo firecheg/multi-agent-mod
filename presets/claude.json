@@ -1,0 +1,58 @@
+{
+  "name": "claude",
+  "cli": "Claude Code",
+  "vendor": "anthropic",
+  "detect": {
+    "paths": [
+      "~/.local/bin/claude.exe",
+      "~/.local/bin/claude"
+    ],
+    "commands": [
+      "claude"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "-p",
+      "--output-format",
+      "json",
+      "--no-session-persistence"
+    ],
+    "input": "stdin",
+    "output": "json",
+    "model_args": [
+      "--model",
+      "{model}"
+    ],
+    "effort_args": [
+      "--effort",
+      "{effort}"
+    ],
+    "sandbox_args": [
+      "--permission-mode",
+      "{sandbox}"
+    ],
+    "default_sandbox": "acceptEdits",
+    "timeout_seconds": 1800
+  },
+  "effort_levels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max"
+  ],
+  "sandbox_modes": [
+    "acceptEdits",
+    "auto",
+    "bypassPermissions",
+    "manual",
+    "plan"
+  ],
+  "checked": "Claude Code 2.1.220 `claude --help`; one-shot call run live 2026-09-13",
+  "notes": "Print mode reads the prompt from stdin; --output-format json returns one object with result and is_error. Model accepts aliases such as sonnet or opus. Under acceptEdits file edits are accepted but shell commands still ask for permission, which headless mode cannot grant: allow the specific commands a reviewer must run (for example with --allowedTools) or pick a different permission mode per node."
+}

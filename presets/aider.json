@@ -1,0 +1,34 @@
+{
+  "name": "aider",
+  "cli": "Aider",
+  "vendor": "aider",
+  "detect": {
+    "paths": [],
+    "commands": [
+      "aider"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "--message-file",
+      "{prompt_file}",
+      "--yes-always",
+      "--no-auto-commits"
+    ],
+    "input": "file",
+    "output": "text",
+    "model_args": [
+      "--model",
+      "{model}"
+    ],
+    "timeout_seconds": 1800
+  },
+  "effort_levels": [],
+  "sandbox_modes": [],
+  "checked": "https://aider.chat/docs/scripting.html, https://aider.chat/docs/config/options.html (not run live)",
+  "notes": "Sends one message from the prompt file and exits. --yes-always accepts every confirmation; --no-auto-commits leaves commits to you. stdout includes Aider's own log lines around the answer. The model name follows Aider's provider/model conventions."
+}

@@ -1,0 +1,36 @@
+{
+  "name": "cursor",
+  "cli": "Cursor CLI",
+  "vendor": "cursor",
+  "detect": {
+    "paths": [],
+    "commands": [
+      "cursor-agent",
+      "agent"
+    ],
+    "version_args": [
+      "--version"
+    ]
+  },
+  "provider": {
+    "argv": [
+      "{bin}",
+      "--print",
+      "--force",
+      "--output-format",
+      "text",
+      "Read the task in {prompt_file} and carry it out. End with your final answer."
+    ],
+    "input": "file",
+    "output": "text",
+    "model_args": [
+      "--model",
+      "{model}"
+    ],
+    "timeout_seconds": 1800
+  },
+  "effort_levels": [],
+  "sandbox_modes": [],
+  "checked": "https://cursor.com/docs/cli/headless (not run live)",
+  "notes": "Print mode takes the prompt as an argument, so the harness passes a prompt file. --force lets the agent edit files without confirmation. Sign-in or CURSOR_API_KEY is handled by the CLI. Upstream reports print mode hanging in some versions; the provider timeout ends a hung run. The generic command name `agent` can belong to another tool: check the detected path."
+}
