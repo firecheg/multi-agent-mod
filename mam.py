@@ -958,6 +958,52 @@ def cmd_doctor(a):
           f"(bundled; pass a path to run your own)")
 
 
+def head(path):
+    text = path.read_text(encoding="utf-8", errors="replace")
+    body = [line[:300] for line in text.splitlines() if line.strip()]
+    more = f"  (+{len(body) - 5} lines)" if len(body) > 5 else ""
+    return f"== {display_path(path.resolve())}{more}\n" + "\n".join(body[:5])
+
+
+def deliver(out, produce):
+    """--out: full answer to a file (failures too, renamed in when done), head to stdout."""
+    if not out:
+        print(produce())
+        return
+    path = Path(out)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.unlink(missing_ok=True)   # a stale answer must not satisfy `wait`
+    try:
+        text = produce()
+    except (AgentError, ValueError, OSError, subprocess.TimeoutExpired) as e:
+        text = f"FAILED: {e}"
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+    print(head(path))
+    if text.startswith("FAILED: "):
+        sys.exit(1)
+
+
+def cmd_wait(a):
+    """Block until every --out file exists, then print each head: one call in
+    the coordinator's history instead of a poll per check."""
+    paths = [Path(p) for p in a.files]
+    deadline = time.monotonic() + a.timeout
+    while not all(p.exists() for p in paths) and time.monotonic() < deadline:
+        time.sleep(2)
+    code = 0
+    for p in paths:
+        if not p.exists():
+            print(f"== {display_path(p.resolve())}  still running after {a.timeout}s")
+            code = 2
+            continue
+        print(head(p))
+        if p.read_text(encoding="utf-8", errors="replace").startswith("FAILED: "):
+            code = max(code, 1)
+    sys.exit(code)
+
+
 def cmd_ask(a):
     prompt = a.prompt if a.prompt != "-" else sys.stdin.read()
     routing_task = prompt
@@ -965,7 +1011,7 @@ def cmd_ask(a):
         prompt = mem_context(prompt, CFG["memory_k"]) + prompt
     d = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-ask-{a.agent}"
     dimensions = load_reasoning_dimensions(a.reasoning)
-    print(run_agent(a.agent, prompt, d, effort=a.effort, task_kind=a.task_kind, reasoning_dimensions=dimensions, model=a.model, routing_task=routing_task))
+    deliver(a.out, lambda: run_agent(a.agent, prompt, d, effort=a.effort, task_kind=a.task_kind, reasoning_dimensions=dimensions, model=a.model, routing_task=routing_task))
 
 
 def cmd_review(a):
@@ -981,7 +1027,7 @@ def cmd_review(a):
         sys.exit("nothing to review")
     d = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-review"
     print(f"[{a.author}]'s work reviewed by [{reviewer}]", file=sys.stderr)
-    print(run_agent(reviewer, VERIFY_TMPL.format(
+    deliver(a.out, lambda: run_agent(reviewer, VERIFY_TMPL.format(
         task=a.task, author=a.author, output=target[:60000],
         criteria="\n".join(f"- {c}" for c in a.criteria),
     ), d, effort=a.effort, task_kind=a.task_kind or "review",
@@ -1129,6 +1175,7 @@ def main():
     p.add_argument("--task-kind")
     p.add_argument("--reasoning", help="JSON object or path to JSON dimensions")
     p.add_argument("--model")
+    p.add_argument("--out", help="write the full answer here, print only its head; pair with wait")
     p.set_defaults(fn=cmd_ask)
 
     p = sub.add_parser("review", help="cross-review (author is never the reviewer)")
@@ -1146,7 +1193,14 @@ def main():
     p.add_argument("--task-kind")
     p.add_argument("--reasoning", help="JSON object or path with all five reasoning dimensions")
     p.add_argument("--model")
+    p.add_argument("--out", help="write the full answer here, print only its head; pair with wait")
     p.set_defaults(fn=cmd_review)
+
+    p = sub.add_parser("wait", help="block until ask/review --out files exist, print their heads")
+    p.add_argument("files", nargs="+")
+    p.add_argument("--timeout", type=int, default=600,
+                   help="seconds; exit 2 if any run is still going (default 600)")
+    p.set_defaults(fn=cmd_wait)
 
     p = sub.add_parser("init", help="record who fills each graph role on this machine")
     p.add_argument("--config", dest="config", default=argparse.SUPPRESS,

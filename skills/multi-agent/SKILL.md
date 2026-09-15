@@ -61,7 +61,16 @@ agent-harness graph build-2r --input "..."   # gated implement -> design ∥ cor
 agent-harness graph court --input "..."      # up to 3 rounds: charge, defence, ruling, fix
 agent-harness mem context "topic" -k 3
 agent-harness mem lint
+agent-harness ask <agent> - --out .mam/task/answer.md < task.md   # full answer to file, head to stdout
+agent-harness wait .mam/task/answer.md .mam/task/review.md --timeout 600
 ```
+
+Every step you take re-sends your whole history, so do not paste worker
+transcripts into it. Write long tasks to a file and pass `-`, start `ask` or
+`review` with `--out` in the background, keep working, then call `wait` once:
+it blocks until every file exists and prints five lines of each. Exit 1 means a
+run failed (its error is in the file), exit 2 means one is still going. Read
+the full file only when the head is not enough.
 
 `review` refuses to run without `--criteria`: the reviewer checks those and
 nothing else, so a missing criterion is an unchecked one. Without `--path` it
