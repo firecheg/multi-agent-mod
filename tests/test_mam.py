@@ -58,6 +58,43 @@ class HarnessTests(unittest.TestCase):
         self.assertFalse(failed)
         self.assertIn("demo-reviewer", results["b"])
 
+    def test_ask_out_prints_head_and_wait_reports_failures(self):
+        import argparse, io
+        from contextlib import redirect_stdout
+
+        def ask(out, reply):
+            args = argparse.Namespace(agent="demo-worker", prompt="p", memory=False, reasoning=None,
+                                      effort="auto", task_kind=None, model=None, out=str(out))
+            with patch.object(mam, "run_agent", side_effect=reply), redirect_stdout(io.StringIO()) as buf:
+                try:
+                    mam.cmd_ask(args)
+                except SystemExit as e:
+                    return buf.getvalue(), e.code
+            return buf.getvalue(), 0
+
+        def wait(*files, timeout=0):
+            with redirect_stdout(io.StringIO()) as buf, self.assertRaises(SystemExit) as e:
+                mam.cmd_wait(argparse.Namespace(files=[str(f) for f in files], timeout=timeout))
+            return buf.getvalue(), e.exception.code
+
+        with tempfile.TemporaryDirectory() as tmp, patch.object(mam, "RUNS", Path(tmp) / ".mam"):
+            ok, bad, missing = Path(tmp) / "ok.md", Path(tmp) / "bad.md", Path(tmp) / "none.md"
+            printed, code = ask(ok, lambda *a, **k: "\n".join(f"line {i}" for i in range(20)))
+            self.assertEqual(code, 0)
+            self.assertIn("line 4", printed)
+            self.assertNotIn("line 5", printed)
+            self.assertIn("line 19", ok.read_text(encoding="utf-8"))
+
+            _, code = ask(bad, mam.AgentError("logged out"))
+            self.assertEqual(code, 1)
+            self.assertEqual(wait(ok)[1], 0)
+            printed, code = wait(ok, bad)
+            self.assertEqual(code, 1)
+            self.assertIn("logged out", printed)
+            printed, code = wait(ok, missing)
+            self.assertEqual(code, 2)
+            self.assertIn("still running", printed)
+
     def test_graph_runs_with_runs_dir_outside_workspace(self):
         spec = {"name": "tiny", "nodes": [
             {"id": "a", "agent": "demo-worker", "prompt": "input={input}", "memory": False},
