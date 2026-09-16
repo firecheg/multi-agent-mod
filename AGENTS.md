@@ -10,7 +10,9 @@ This repository contains reusable orchestration technology, not a personal agent
 - Preserve source attribution and MIT notices. Document unsupported capabilities honestly.
 - Change client configuration only with an explicit client selection and reversible, conflict-aware operations.
 
-For reusable coordination guidance, load only the triggered file under
-`examples/rules/`: routing, source-reading, memory-collaboration, or
-verification. Ordinary answers and small reversible edits need no delegation or
-memory ritual.
+Before any substantial engineering work, load `examples/rules/routing.md`: the
+coordinator delegates implementation, tests and code exploration instead of
+doing them itself. Load the other files under `examples/rules/`
+(source-reading, memory-collaboration, verification) only when triggered.
+Answers, reading a single file and one-line configuration edits need no
+delegation or memory ritual.

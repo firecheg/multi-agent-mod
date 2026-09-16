@@ -36,5 +36,19 @@ nor a declared ancestor fails validation before any agent runs.
 - **Roles that must differ** without a review edge: top-level
   `"distinct": [["spec", "implement", "prosecutor"]]`.
 
+## Output contract
+
+A worker's free text is what `{id}` hands on, so a node that changes files or
+runs checks ends its prompt with this tail and lists it in `verify.criteria`:
+
+```text
+changed_files: <path per line, or none>
+checks: <command> -> <pass|fail: first error line>, or none run
+assumptions: <what was not verified>
+```
+
+A verifier fails an attempt whose tail is missing or claims a check it did not
+show. Read-only and debate nodes skip the tail.
+
 Improving a result within a step is a loop (`verify`); handing work between
 components is a graph (`needs`).
