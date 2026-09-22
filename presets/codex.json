@@ -23,6 +23,8 @@
       "-c",
       "project_doc_max_bytes=0",
       "--ignore-user-config",
+      "-c",
+      "windows.sandbox=\"unelevated\"",
       "--disable",
       "plugins",
       "--disable",
@@ -44,7 +46,7 @@
     ],
     "default_sandbox": "workspace-write",
     "session_persistence": true,
-    "resume_argv": ["exec", "resume", "--skip-git-repo-check", "-c", "project_doc_max_bytes=0", "--ignore-user-config", "--disable", "plugins", "--disable", "apps", "{session_id}", "-"],
+    "resume_argv": ["exec", "resume", "--skip-git-repo-check", "-c", "project_doc_max_bytes=0", "--ignore-user-config", "-c", "windows.sandbox=\"unelevated\"", "--disable", "plugins", "--disable", "apps", "{session_id}", "-"],
     "resume_sandbox_args": ["-c", "sandbox_mode=\"{sandbox}\""],
     "session_id_regex": "session id: ([^\\s]+)",
     "timeout_seconds": 1800

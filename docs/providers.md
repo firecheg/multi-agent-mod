@@ -151,9 +151,9 @@ models, and reasoning settings while applying the corresponding fields:
   "session_id_field": "session_id"
 },
 "codex": {
-  "argv": ["<existing codex executable>", "exec", "--skip-git-repo-check", "--color", "never", "-c", "project_doc_max_bytes=0", "--ignore-user-config", "--disable", "plugins", "--disable", "apps"],
+  "argv": ["<existing codex executable>", "exec", "--skip-git-repo-check", "--color", "never", "-c", "project_doc_max_bytes=0", "--ignore-user-config", "-c", "windows.sandbox=\"unelevated\"", "--disable", "plugins", "--disable", "apps"],
   "session_persistence": true,
-  "resume_argv": ["exec", "resume", "--skip-git-repo-check", "-c", "project_doc_max_bytes=0", "--ignore-user-config", "--disable", "plugins", "--disable", "apps", "{session_id}", "-"],
+  "resume_argv": ["exec", "resume", "--skip-git-repo-check", "-c", "project_doc_max_bytes=0", "--ignore-user-config", "-c", "windows.sandbox=\"unelevated\"", "--disable", "plugins", "--disable", "apps", "{session_id}", "-"],
   "resume_sandbox_args": ["-c", "sandbox_mode=\"{sandbox}\""],
   "session_id_regex": "session id: ([^\\s]+)"
 }
@@ -165,3 +165,9 @@ id. `codex exec resume` accepts `--skip-git-repo-check`, `--ignore-user-config`,
 `--disable`, `--enable`, `-m` and `-c`, but not
 `--color` or `-s`; keep colour only on normal calls and map the sandbox via
 `-c` on resume. Do not add `resume_drop_args` (it is unsupported).
+
+`--ignore-user-config` also drops the `[windows] sandbox` setting from
+`~/.codex/config.toml`. Without it Codex on Windows silently downgrades
+`-s workspace-write` to `read-only`, so a worker can neither edit files nor run
+commands. `-c windows.sandbox="unelevated"` restores the sandbox without admin
+rights; the `[windows]` table has no effect elsewhere.

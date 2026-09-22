@@ -129,6 +129,17 @@ class BackendPresetTests(unittest.TestCase):
         self.assertTrue(ProviderRegistry(config).primary_allowed("glm", "opus"),
                         "Claude Code with GLM inside is not the same provider as Anthropic")
 
+    def test_codex_keeps_its_windows_sandbox_without_user_config(self):
+        # --ignore-user-config drops [windows] sandbox; without it Codex on
+        # Windows silently runs workspace-write as read-only.
+        provider = cold_start.load_presets()["codex"]["provider"]
+        for key in ("argv", "resume_argv"):
+            with self.subTest(argv=key):
+                argv = provider[key]
+                self.assertIn("--ignore-user-config", argv)
+                at = argv.index('windows.sandbox="unelevated"')
+                self.assertEqual(argv[at - 1], "-c")
+
     def test_every_preset_says_whether_it_ran_live(self):
         for name, preset in cold_start.load_presets().items():
             with self.subTest(preset=name):
