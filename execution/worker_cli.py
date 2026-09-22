@@ -19,7 +19,7 @@ from providers import PROMPT_FILE, ProviderConfigError, ProviderRegistry, load_c
 from reasoning_router import assessment_text, route, validate_reasoning_config
 
 
-def command(provider, model, run, effort=None, registry=None, agent=None, sandbox=None):
+def command(provider, model, run, effort=None, registry=None, agent=None, sandbox=None, session_id=None):
     """Build a shell-free argv list from the configured provider registry.
 
     There is no vendor-specific fallback here: every provider, including any
@@ -29,8 +29,10 @@ def command(provider, model, run, effort=None, registry=None, agent=None, sandbo
     if registry is None:
         registry = ProviderRegistry(load_config())
     if agent is not None:
-        return registry.command(agent, run, model=model, effort=effort, sandbox=sandbox)
-    return registry.command_for_provider(provider, run, model=model, effort=effort, sandbox=sandbox)
+        return registry.command(agent, run, model=model, effort=effort, sandbox=sandbox,
+                                session_id=session_id)
+    return registry.command_for_provider(provider, run, model=model, effort=effort,
+                                         sandbox=sandbox, session_id=session_id)
 
 
 def _decision(config, registry, provider, model, prompt):
@@ -51,7 +53,7 @@ def _decision(config, registry, provider, model, prompt):
                  capability_resolver=registry.capabilities)
 
 
-def invoke(prompt, run, config, registry=None, cwd=None):
+def invoke(prompt, run, config, registry=None, cwd=None, session_id=None):
     """Run one configured provider and persist argv/reasoning/provenance logs.
 
     `run` is where logs (and this call's cache/results, for callers that use
@@ -77,14 +79,26 @@ def invoke(prompt, run, config, registry=None, cwd=None):
             raise ValueError("provider is required")
         spec = registry.provider(provider)
         model = config.get("model", spec.default_model)
+    role = config.get("role") or (registry.profile(agent)["role"] if agent else "worker")
+    sections = [f"ROLE: {role}"]
+    if session_id is None:
+        files = registry.role_files(role)
+        if files:
+            try:
+                sections.extend(["\n\n".join(path.read_text(encoding="utf-8").rstrip()
+                                             for path in files), "---"])
+            except OSError as exc:
+                raise ProviderConfigError(f"role_prompts.{role}: {exc}") from exc
+    sent_prompt = "\n\n".join([*sections, prompt])
     decision = _decision(config, registry, provider, model, prompt)
     (run / "reasoning.json").write_text(json.dumps(decision, ensure_ascii=False, indent=2), encoding="utf-8")
     argv = command(provider, model, run, decision.get("effective"), registry=registry, agent=agent,
-                  sandbox=config.get("sandbox"))
+                   sandbox=config.get("sandbox"), session_id=session_id)
     identity = registry.identity(agent) if agent else spec.author_identity
     metadata = {"provider": provider, "model": model, "agent": agent,
                 "author_identity": identity, "argv": argv,
-                "reasoning": decision, "status": "dispatched"}
+                 "reasoning": decision, "resumed": session_id is not None,
+                 "status": "dispatched"}
     (run / "argv.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     timeout = config.get("timeout_seconds", spec.timeout_seconds)
     if type(timeout) is not int or timeout <= 0:
@@ -95,11 +109,11 @@ def invoke(prompt, run, config, registry=None, cwd=None):
         metadata.update(status="failed", error=str(exc))
         (run / "argv.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
         raise
-    stdin_text = prompt
+    stdin_text = sent_prompt
     if spec.input == "file":
         # The CLI takes the prompt as an argument naming this file; stdin is
         # still created and closed empty so a CLI that also polls it cannot hang.
-        (run / PROMPT_FILE).write_text(prompt, encoding="utf-8")
+        (run / PROMPT_FILE).write_text(sent_prompt, encoding="utf-8")
         stdin_text = ""
     try:
         # Passing ``input`` asks subprocess to create and close stdin.  Giving
@@ -118,6 +132,10 @@ def invoke(prompt, run, config, registry=None, cwd=None):
     if proc.returncode:
         raise ValueError(f"{provider} exited {proc.returncode}; log: {run}; no automatic retry")
     parsed = registry.parse_provider_output(provider, proc.stdout)
+    captured = registry.session_id(agent or provider, proc.stdout, proc.stderr, parsed,
+                                   agent=agent is not None)
+    if captured:
+        parsed["session_id"] = captured
     parsed.setdefault("is_error", False)
     parsed.setdefault("subtype", "success")
     parsed.setdefault("provider", provider)

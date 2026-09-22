@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 LEVELS = ("low", "medium", "high", "xhigh", "max")
 _TOKEN = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
-_ALLOWED_TOKENS = {"python", "package_dir", "model", "effort", "run", "provider", "sandbox", "prompt_file"}
+_ALLOWED_TOKENS = {"python", "package_dir", "model", "effort", "run", "provider", "sandbox", "prompt_file", "session_id"}
 _OUTPUTS = {"text", "json", "json_field"}
 # stdin: the prompt is written to the process's standard input.
 # file: the prompt is written to <run>/prompt.md, passed as {prompt_file}, and
@@ -88,6 +88,12 @@ class ProviderSpec:
     timeout_seconds: int
     input: str = "stdin"
     env: tuple[tuple[str, str], ...] = ()
+    session_persistence: bool = False
+    resume_args: tuple[str, ...] = ()
+    resume_argv: tuple[str, ...] = ()
+    resume_sandbox_args: tuple[str, ...] = ()
+    session_id_field: str | None = None
+    session_id_regex: str | None = None
 
     def capabilities(self, model: str | None = None):
         selected = model or self.default_model
@@ -104,7 +110,8 @@ def validate_config(config):
     if not isinstance(config, dict):
         raise ProviderConfigError("configuration must be an object")
     allowed = {"memory_k", "memory_max_chars", "timeout", "providers", "agents",
-               "reviewers", "review_policy", "role_bindings", "limits", "shared_dir"}
+               "reviewers", "review_policy", "role_bindings", "limits", "shared_dir",
+               "initiator_detection", "role_prompts"}
     unknown = set(config) - allowed
     if unknown:
         raise ProviderConfigError("unknown configuration fields: " + ", ".join(sorted(unknown)))
@@ -112,6 +119,14 @@ def validate_config(config):
     if not isinstance(providers, dict) or not providers:
         raise ProviderConfigError("providers must be a non-empty object")
     normalized = dict(config)
+    prompts = config.get("role_prompts", {})
+    if not isinstance(prompts, dict) or any(
+            not isinstance(role, str) or not role or
+            not isinstance(paths, list) or not paths or
+            any(not isinstance(path, str) or not path for path in paths)
+            for role, paths in prompts.items()):
+        raise ProviderConfigError("role_prompts must map role names to non-empty path lists")
+    normalized["role_prompts"] = {role: list(paths) for role, paths in prompts.items()}
     normalized["providers"] = {}
     for name, raw in providers.items():
         _string(name, "provider name")
@@ -119,7 +134,10 @@ def validate_config(config):
             raise ProviderConfigError(f"providers.{name} must be an object")
         allowed_provider = {"argv", "input", "output", "output_field", "model_args",
                             "effort_args", "sandbox_args", "default_sandbox", "models",
-                            "default_model", "author_identity", "timeout_seconds", "env"}
+                            "default_model", "author_identity", "timeout_seconds", "env",
+                            "session_persistence", "resume_args", "resume_argv",
+                            "resume_sandbox_args",
+                            "session_id_field", "session_id_regex"}
         extra = set(raw) - allowed_provider
         if extra:
             raise ProviderConfigError(f"providers.{name}: unknown fields: {', '.join(sorted(extra))}")
@@ -187,6 +205,28 @@ def validate_config(config):
                 raise ProviderConfigError(
                     f"providers.{name}.env.{key} looks like a credential: write ${{YOUR_VARIABLE}}, "
                     f"never the value")
+        persistence = raw.get("session_persistence", False)
+        if type(persistence) is not bool:
+            raise ProviderConfigError(f"providers.{name}.session_persistence must be boolean")
+        resume_args = _check_tokens(_string_list(raw.get("resume_args", []),
+                                                 f"providers.{name}.resume_args"),
+                                    f"providers.{name}.resume_args")
+        resume_argv = _check_tokens(_string_list(raw.get("resume_argv", []),
+                                                 f"providers.{name}.resume_argv"),
+                                   f"providers.{name}.resume_argv")
+        resume_sandbox_args = _check_tokens(_string_list(raw.get("resume_sandbox_args", []),
+                                                         f"providers.{name}.resume_sandbox_args"),
+                                            f"providers.{name}.resume_sandbox_args")
+        session_id_field = raw.get("session_id_field")
+        if session_id_field is not None:
+            _string(session_id_field, f"providers.{name}.session_id_field")
+        session_id_regex = raw.get("session_id_regex")
+        if session_id_regex is not None:
+            _string(session_id_regex, f"providers.{name}.session_id_regex")
+            try:
+                re.compile(session_id_regex)
+            except re.error as exc:
+                raise ProviderConfigError(f"providers.{name}.session_id_regex is invalid: {exc}") from exc
         normalized["providers"][name] = {
             "env": dict(env),
             "argv": argv, "input": input_mode, "output": output,
@@ -195,6 +235,10 @@ def validate_config(config):
             "default_sandbox": default_sandbox, "models": models,
             "default_model": default_model, "author_identity": identity,
             "timeout_seconds": timeout,
+            "session_persistence": persistence,
+            "resume_args": resume_args, "resume_argv": resume_argv,
+            "resume_sandbox_args": resume_sandbox_args,
+            "session_id_field": session_id_field, "session_id_regex": session_id_regex,
         }
     agents = config.get("agents", {})
     if not isinstance(agents, dict) or not agents:
@@ -241,6 +285,17 @@ def validate_config(config):
             for role, alias in bindings.items()):
         raise ProviderConfigError("role_bindings must map role names to configured agent profiles")
     normalized["role_bindings"] = dict(bindings)
+    detection = config.get("initiator_detection", [])
+    if not isinstance(detection, list):
+        raise ProviderConfigError("initiator_detection must be a list")
+    for item in detection:
+        if not isinstance(item, dict) or set(item) - {"env", "value", "agent"} or \
+                not isinstance(item.get("env"), str) or not _ENV_NAME.fullmatch(item["env"]) or \
+                not isinstance(item.get("agent"), str) or \
+                item["agent"] not in normalized["agents"] or \
+                ("value" in item and not isinstance(item["value"], str)):
+            raise ProviderConfigError("initiator_detection entries require env and configured agent; value is optional")
+    normalized["initiator_detection"] = detection
     for key in ("memory_k", "memory_max_chars"):
         if key in normalized and (type(normalized[key]) is not int or normalized[key] < 0):
             raise ProviderConfigError(f"{key} must be a non-negative integer")
@@ -275,6 +330,14 @@ class ProviderRegistry:
         except KeyError as exc:
             raise ProviderConfigError(f"unknown agent profile {alias!r}") from exc
 
+    def role_files(self, role):
+        base = Path(self.config["_config_path"]).parent if "_config_path" in self.config else Path.cwd()
+        files = []
+        for raw in self.config.get("role_prompts", {}).get(role, []):
+            path = Path(raw).expanduser()
+            files.append(path if path.is_absolute() else base / path)
+        return files
+
     def provider(self, name):
         try:
             raw = self.config["providers"][name]
@@ -289,7 +352,13 @@ class ProviderRegistry:
                             author_identity=raw["author_identity"],
                             timeout_seconds=raw["timeout_seconds"],
                             input=raw.get("input", "stdin"),
-                            env=tuple(raw.get("env", {}).items()))
+                            env=tuple(raw.get("env", {}).items()),
+                            session_persistence=raw.get("session_persistence", False),
+                            resume_args=tuple(raw.get("resume_args", ())),
+                            resume_argv=tuple(raw.get("resume_argv", ())),
+                            resume_sandbox_args=tuple(raw.get("resume_sandbox_args", ())),
+                            session_id_field=raw.get("session_id_field"),
+                            session_id_regex=raw.get("session_id_regex"))
 
     def environment(self, provider, model=None, base=None):
         """The subprocess environment for `provider`: the caller's environment
@@ -353,42 +422,64 @@ class ProviderRegistry:
         return self.profile(candidate)["provider"] != self.profile(author)["provider"]
 
     @staticmethod
-    def _expand(value, *, model, effort, run, provider, sandbox=""):
+    def _expand(value, *, model, effort, run, provider, sandbox="", session_id=None):
         values = {"python": sys.executable,
                   "package_dir": str(Path(__file__).resolve().parents[1]),
                   "model": model or "", "effort": effort or "", "run": str(run),
                   "provider": provider, "sandbox": sandbox or "",
-                  "prompt_file": str(Path(run) / PROMPT_FILE)}
+                  "prompt_file": str(Path(run) / PROMPT_FILE), "session_id": session_id or ""}
         return _TOKEN.sub(lambda match: values[match.group(1)], value)
 
-    def command(self, alias, run, model=None, effort=None, sandbox=None):
+    def command(self, alias, run, model=None, effort=None, sandbox=None, session_id=None):
         provider, profile_model, spec = self.resolve(alias)
         return self.command_for_provider(provider, run, model=model or profile_model,
-                                         effort=effort, sandbox=sandbox)
+                                         effort=effort, sandbox=sandbox, session_id=session_id)
 
-    def command_for_provider(self, provider, run, model=None, effort=None, sandbox=None):
+    def command_for_provider(self, provider, run, model=None, effort=None, sandbox=None, session_id=None):
         spec = self.provider(provider)
         model = model or spec.default_model
         if model not in spec.models:
             raise ProviderConfigError(f"unknown model {model!r} for provider {provider!r}")
-        args = [self._expand(item, model=model, effort=effort, run=run, provider=provider)
-                for item in spec.argv]
+        if session_id is not None and not spec.session_persistence:
+            raise ProviderConfigError(f"provider {provider!r} has session reuse disabled")
+        template = spec.resume_argv if session_id is not None and spec.resume_argv else spec.argv
+        args = [self._expand(item, model=model, effort=effort, run=run, provider=provider,
+                             session_id=session_id) for item in template]
+        if session_id is not None and spec.resume_argv:
+            args.insert(0, self._expand(spec.argv[0], model=model, effort=effort, run=run,
+                                       provider=provider, session_id=session_id))
+        options = []
+        if session_id is not None and spec.resume_args:
+            options.extend(self._expand(item, model=model, effort=effort, run=run,
+                                        provider=provider, session_id=session_id)
+                           for item in spec.resume_args)
         if spec.model_args:
-            args.extend(self._expand(item, model=model, effort=effort, run=run, provider=provider)
-                        for item in spec.model_args)
+            options.extend(self._expand(item, model=model, effort=effort, run=run, provider=provider,
+                                        session_id=session_id)
+                           for item in spec.model_args)
         if effort:
             if effort not in spec.capabilities(model):
                 raise ProviderConfigError(f"{provider}/{model} does not support effort {effort}")
-            args.extend(self._expand(item, model=model, effort=effort, run=run, provider=provider)
-                        for item in spec.effort_args)
+            options.extend(self._expand(item, model=model, effort=effort, run=run, provider=provider,
+                                        session_id=session_id)
+                           for item in spec.effort_args)
         if sandbox is not None or spec.default_sandbox:
             mode = sandbox if sandbox is not None else spec.default_sandbox
+            if session_id is not None and not spec.resume_sandbox_args:
+                mode = None
             if mode:
-                if not spec.sandbox_args:
+                sandbox_args = spec.resume_sandbox_args if session_id is not None else spec.sandbox_args
+                if not sandbox_args:
                     raise ProviderConfigError(f"provider {provider!r} has no sandbox_args configured")
-                args.extend(self._expand(item, model=model, effort=effort, run=run,
-                                         provider=provider, sandbox=mode)
-                            for item in spec.sandbox_args)
+                options.extend(self._expand(item, model=model, effort=effort, run=run,
+                                            provider=provider, sandbox=mode, session_id=session_id)
+                               for item in sandbox_args)
+        marker = next((i + 1 for i, item in enumerate(template) if "{session_id}" in item), None) \
+            if session_id is not None and spec.resume_argv else None
+        if marker is None:
+            args.extend(options)
+        else:
+            args[marker:marker] = options
         return args
 
     def parse_output(self, alias, stdout):
@@ -398,6 +489,29 @@ class ProviderRegistry:
     def parse_provider_output(self, provider, stdout):
         spec = self.provider(provider)
         return self._parse_output(provider, spec, stdout)
+
+    def session_id(self, alias_or_provider, stdout, stderr, parsed=None, *, agent=True):
+        provider = self.resolve(alias_or_provider)[0] if agent else alias_or_provider
+        spec = self.provider(provider)
+        if spec.session_id_field:
+            value = parsed
+            if value is None:
+                try:
+                    value = json.loads(stdout)
+                except json.JSONDecodeError:
+                    value = None
+            for part in spec.session_id_field.split("."):
+                if not isinstance(value, dict) or part not in value:
+                    value = None
+                    break
+                value = value[part]
+            if isinstance(value, str) and value:
+                return value
+        if spec.session_id_regex:
+            match = re.search(spec.session_id_regex, stderr or "") or re.search(spec.session_id_regex, stdout or "")
+            if match:
+                return match.group(1) if match.lastindex else match.group(0)
+        return None
 
     @staticmethod
     def _parse_output(provider, spec, stdout):

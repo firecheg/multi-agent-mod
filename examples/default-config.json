@@ -2,6 +2,14 @@
   "memory_k": 5,
   "memory_max_chars": 6000,
   "timeout": 30,
+  "initiator_detection": [],
+  "role_prompts": {
+    "implementation": ["rules/worker.md", "rules/coder.md"],
+    "review": ["rules/worker.md", "rules/reviewer.md"],
+    "qa": ["rules/worker.md", "rules/qa.md"],
+    "reading": ["rules/worker.md", "rules/reader.md"],
+    "research": ["rules/worker.md", "rules/researcher.md"]
+  },
   "providers": {
     "demo": {
       "argv": ["{python}", "{package_dir}/demo/offline_provider.py"],
@@ -18,8 +26,8 @@
     }
   },
   "agents": {
-    "demo-worker": {"provider": "demo", "model": "demo", "role": "worker", "description": "Offline deterministic demonstration worker"},
-    "demo-reviewer": {"provider": "demo", "model": "demo", "role": "reviewer", "description": "Offline deterministic demonstration reviewer", "author_identity": "agent-harness-demo-reviewer"}
+    "demo-worker": {"provider": "demo", "model": "demo", "role": "implementation", "description": "Offline deterministic demonstration worker"},
+    "demo-reviewer": {"provider": "demo", "model": "demo", "role": "review", "description": "Offline deterministic demonstration reviewer", "author_identity": "agent-harness-demo-reviewer"}
   },
   "role_bindings": {"summary": "demo-worker", "code": "demo-worker", "context_read": "demo-worker"},
   "reviewers": {"demo-worker": ["demo-reviewer"], "demo-reviewer": ["demo-worker"]}

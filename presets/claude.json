@@ -20,7 +20,11 @@
       "-p",
       "--output-format",
       "json",
-      "--no-session-persistence"
+      "--setting-sources=",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}",
+      "--disable-slash-commands"
     ],
     "input": "stdin",
     "output": "json",
@@ -37,6 +41,9 @@
       "{sandbox}"
     ],
     "default_sandbox": "acceptEdits",
+    "session_persistence": true,
+    "resume_args": ["--resume", "{session_id}"],
+    "session_id_field": "session_id",
     "timeout_seconds": 1800
   },
   "effort_levels": [

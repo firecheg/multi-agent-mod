@@ -73,6 +73,7 @@ class EnvRoundTripTests(unittest.TestCase):
                               "ANTHROPIC_AUTH_TOKEN": "${HARNESS_TEST_TOKEN}",
                               "ANTHROPIC_API_KEY": "", "ANTHROPIC_MODEL": "{model}"}, script)
             registry = ProviderRegistry(config)
+            registry.config["_config_path"] = str(ROOT / "examples/default-config.json")
             with patch.dict(os.environ, {"HARNESS_TEST_TOKEN": "secret-from-env", "ANTHROPIC_API_KEY": "leak"}):
                 out = worker_cli.invoke("hi", Path(tmp, "run"), {"agent": "demo-worker"}, registry=registry)
             self.assertEqual((out["base"], out["token"], out["api_key_present"], out["model_env"]),

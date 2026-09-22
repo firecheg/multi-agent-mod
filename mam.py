@@ -297,6 +297,28 @@ def load_roles():
     return json.loads(ROLES_FILE.read_text(encoding="utf-8"))
 
 
+class CoordinatorHandoff(AgentError):
+    """A coordinator-bound step is waiting for a verdict file."""
+
+    def __init__(self, run_dir, step, path):
+        self.run_dir, self.step, self.path = Path(run_dir), step, Path(path)
+        super().__init__(f"coordinator handoff for {step}: {self.path}")
+
+
+def detect_initiator(explicit=None):
+    """Resolve the coordinator without identifying a provider in orchestration."""
+    direct = explicit or os.environ.get("MAM_INITIATOR")
+    if direct:
+        if direct not in CFG.get("agents", {}):
+            raise ValueError(f"unknown initiator agent {direct!r}")
+        return direct
+    for item in CFG.get("initiator_detection", ()):
+        value = os.environ.get(item["env"])
+        if value and ("value" not in item or value == item["value"]):
+            return item["agent"]
+    return None
+
+
 def role_chain(roles, role):
     """The agents a role may resolve to, in the user's own order of preference."""
     v = roles.get(role)
@@ -310,7 +332,7 @@ def role_chain(roles, role):
 REVIEWER_REF = re.compile(r"reviewer:([1-9])")
 
 
-def _bind_reviewer_refs(bound):
+def _bind_reviewer_refs(bound, coordinator=None):
     nodes = {m["id"]: m for n in bound["nodes"] for m in (_sub_nodes(n) or [n])}
     # Decided before anything resolves, so the answer does not depend on node order.
     unresolved = {i for i, m in nodes.items() if REVIEWER_REF.fullmatch(str(m["agent"]))}
@@ -321,7 +343,7 @@ def _bind_reviewer_refs(bound):
                              f"reference; name an agent or role there")
         rank = int(REVIEWER_REF.fullmatch(ref).group(1))
         try:
-            return pick_reviewers(author, rank)[rank - 1]
+            return pick_reviewers(author, rank, coordinator=coordinator)[rank - 1]
         except (AgentError, ProviderConfigError) as exc:
             raise ValueError(f"{where}: cannot resolve {ref!r} for author {author!r}: {exc}") from exc
 
@@ -344,13 +366,14 @@ def _author_key(agent):
         return agent
 
 
-def bind_roles(spec, roles=None):
+def bind_roles(spec, roles=None, initiator=None):
     """Substitute role names for agent names throughout a graph spec.
 
     Roles share the agent namespace and are consulted only when the name is not
     a configured agent, so a spec that names agents outright still runs.
     """
     roles = load_roles() if roles is None else roles
+    coordinator = detect_initiator(initiator)
     bound = json.loads(json.dumps(spec))
 
     def bind(name, where):
@@ -359,7 +382,7 @@ def bind_roles(spec, roles=None):
         chain = role_chain(roles, name)
         if chain:
             for candidate in chain:
-                if installed(candidate):
+                if installed(candidate) or candidate == coordinator:
                     return candidate
             raise ValueError(
                 f"{where}: role {name!r} lists {', '.join(chain)}, none of them installed. "
@@ -377,7 +400,7 @@ def bind_roles(spec, roles=None):
             v = m.get("verify")
             if v and v.get("by"):
                 v["by"] = bind(v["by"], f"{m['id']}.verify.by")
-    _bind_reviewer_refs(bound)
+    _bind_reviewer_refs(bound, coordinator)
     # Roles that must not collapse onto one author. review_of covers the pairs
     # that have an edge in the graph; this covers the rest — "the prosecutor
     # wrote neither the spec nor the code" is a rule about three nodes, not an
@@ -441,7 +464,7 @@ def _same_identity(a, b):
         return False
 
 
-def pick_reviewer(author, exclude=()):
+def pick_reviewer(author, exclude=(), coordinator=None):
     """The primary reviewer: first installed, independently-identified agent
     in the author's `reviewers` order that also satisfies `review_policy`.
     Enforces no-self-review, including a different alias that shares the
@@ -450,7 +473,7 @@ def pick_reviewer(author, exclude=()):
     for cand in REGISTRY.reviewer_candidates(author):
         if cand in banned or not REGISTRY.primary_allowed(author, cand):
             continue
-        if installed(cand):
+        if installed(cand) or cand == coordinator:
             return cand
     policy = CFG.get("review_policy", {}).get("primary", "independent")
     raise AgentError(f"no installed cross-reviewer for {author!r} (author is never eligible"
@@ -458,15 +481,15 @@ def pick_reviewer(author, exclude=()):
                         if policy == "other_provider" else ")"))
 
 
-def pick_reviewers(author, count):
+def pick_reviewers(author, count, coordinator=None):
     """Primary reviewer, then further independent installed reviewers in the
     author's `reviewers` order. The policy constrains only the primary."""
-    primary = pick_reviewer(author)
+    primary = pick_reviewer(author, coordinator=coordinator)
     picked = [primary]
     for cand in REGISTRY.reviewer_candidates(author):
         if len(picked) == count:
             break
-        if cand not in picked and installed(cand):
+        if cand not in picked and (installed(cand) or cand == coordinator):
             picked.append(cand)
     if len(picked) < count:
         raise AgentError(f"{author!r} has {len(picked)} installed independent reviewer(s); "
@@ -474,9 +497,60 @@ def pick_reviewers(author, count):
     return picked
 
 
+def _session_file(session_dir, key, agent):
+    token = hashlib.sha256(f"{key}\0{agent}".encode("utf-8")).hexdigest()[:24]
+    return Path(session_dir) / "sessions" / f"{token}.id"
+
+
+def _stored_session(session_dir, key, agent):
+    try:
+        return _session_file(session_dir, key, agent).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _step_file(run_dir, step):
+    name = step if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", step) else \
+        hashlib.sha256(step.encode("utf-8")).hexdigest()[:24]
+    return Path(run_dir) / "steps" / f"{name}.out"
+
+
+def _coordinator_call(agent, prompt, node_dir, run_dir, step, ctx, log):
+    node_dir = Path(node_dir); run_dir = Path(run_dir)
+    node_dir.mkdir(parents=True, exist_ok=True)
+    handoff = node_dir / "coordinator-handoff.md"
+    artifacts = {k: v for k, v in ctx.items() if not str(k).startswith("_mam_")}
+    handoff.write_text(
+        f"# Coordinator handoff\n\nstep: {step}\nagent: {agent}\n\n"
+        "## Prompt\n\n" + prompt + "\n\n## Artifacts\n\n" +
+        json.dumps(artifacts, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    pending = {"step": step, "agent": agent, "path": str(handoff)}
+    (run_dir / "pending-handoff.json").write_text(
+        json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
+    log(f"  !! coordinator step {step} paused; verdict: `agent-harness verdict {display_path(run_dir)} -`"
+        f" (handoff: {display_path(handoff)})")
+    raise CoordinatorHandoff(run_dir, step, handoff)
+
+
+def _run_step(agent, prompt, node_dir, *, run_dir, step, ctx, log, coordinator=None,
+              no_in_session=False, fallback_prompt=None, session_key=None, **kwargs):
+    output_file = _step_file(run_dir, step)
+    if output_file.exists():
+        return output_file.read_text(encoding="utf-8")
+    if coordinator and not no_in_session and agent == coordinator:
+        return _coordinator_call(agent, fallback_prompt or prompt, node_dir, run_dir, step, ctx, log)
+    output = run_agent(agent, prompt, node_dir, session_dir=run_dir,
+                       session_key=session_key or step,
+                       fallback_prompt=fallback_prompt, log=log, **kwargs)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(output, encoding="utf-8")
+    return output
+
+
 def run_agent(agent, prompt, node_dir, timeout=None, sandbox=None, effort=None,
               task_kind=None, reasoning_dimensions=None, model=None, routing_task=None,
-              cap=None):
+              cap=None, session_dir=None, session_key=None, session_path=None,
+              fallback_prompt=None, role=None, log=None):
     """Run one configured agent through the shared provider registry.
 
     The prompt goes on stdin; the reply comes back from stdout, shaped by the
@@ -495,14 +569,43 @@ def run_agent(agent, prompt, node_dir, timeout=None, sandbox=None, effort=None,
     }, allow_model=True)
     config = {'agent': agent, **to_worker_config(reasoning),
               '_routing_task': routing_task if routing_task is not None else prompt}
+    if role is not None:
+        config['role'] = role
     if sandbox is not None:
         config['sandbox'] = sandbox
     if timeout is not None:
         config['timeout_seconds'] = timeout
+    session_dir = Path(session_dir or node_dir)
+    session_key = session_key or agent
+    session_file = Path(session_path) if session_path is not None else \
+        _session_file(session_dir, session_key, agent)
     try:
-        response = worker_cli.invoke(prompt, node_dir, config, registry=REGISTRY, cwd=WORK)
+        session_id = session_file.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        session_id = None
+    resumable = bool(session_id and REGISTRY.resolve(agent)[2].session_persistence)
+    try:
+        response = worker_cli.invoke(prompt if resumable else fallback_prompt or prompt,
+                                     node_dir, config, registry=REGISTRY, cwd=WORK,
+                                     session_id=session_id if resumable else None)
+        if response.get("is_error") or not str(response.get("result") or "").strip():
+            raise ValueError("resumed call returned no usable result" if resumable else
+                             "provider returned no usable result")
     except (ProviderConfigError, ValueError, OSError, subprocess.TimeoutExpired) as exc:
-        raise AgentError(f"{agent}: {exc}") from exc
+        if not resumable:
+            raise AgentError(f"{agent}: {exc}") from exc
+        fallback = session_dir / "resume-fallback.log"
+        with fallback.open("a", encoding="utf-8", errors="replace") as stream:
+            stream.write(f"{session_key}/{agent}: resumed session failed; "
+                         f"fell back to a fresh session: {exc}\n")
+        session_file.unlink(missing_ok=True)
+        if log:
+            log(f"  !! {agent} resume failed; fell back to a fresh session")
+        try:
+            response = worker_cli.invoke(fallback_prompt or prompt, node_dir, config,
+                                         registry=REGISTRY, cwd=WORK)
+        except (ProviderConfigError, ValueError, OSError, subprocess.TimeoutExpired) as fresh:
+            raise AgentError(f"{agent}: {fresh}") from fresh
     text = response.get('result')
     # An error response or an empty reply means the agent never did the work —
     # it bailed on auth, a bad flag, or a refusal. Falling back to raw stdout
@@ -510,6 +613,10 @@ def run_agent(agent, prompt, node_dir, timeout=None, sandbox=None, effort=None,
     # fail loudly instead; the full transcript stays in node_dir for diagnosis.
     if response.get('is_error') or not isinstance(text, str) or not text.strip():
         raise AgentError(f"{agent} returned no usable result (log: {node_dir})")
+    new_session = response.get("session_id")
+    if new_session and REGISTRY.resolve(agent)[2].session_persistence:
+        session_file.parent.mkdir(parents=True, exist_ok=True)
+        session_file.write_text(new_session, encoding="utf-8")
     return text
 
 
@@ -702,8 +809,11 @@ def run_rounds(node, ctx, run_dir, log):
     nid, until, limit = node["id"], cfg["until"], cfg.get("max", 3)
     local = dict(ctx)
     local["previous"] = ""
+    local["_mam_round_nodes"] = {s["id"] for s in cfg["nodes"]}
     for r in range(1, limit + 1):
         local["round"] = f"{r} of {limit}"
+        local["_mam_round_index"] = r
+        local["_mam_round_limit"] = limit
         transcript, verdict = [], None
         for s in cfg["nodes"]:
             out = run_node(s, local, run_dir / f"{nid}.r{r}", log)
@@ -774,9 +884,14 @@ def _extract_memory_note(text):
 
 
 def run_node(node, ctx, run_dir, log):
+    coordinator = ctx.get("_mam_coordinator")
+    no_in_session = ctx.get("_mam_no_in_session", False)
+    session_root = ctx.get("_mam_session_dir", run_dir)
     if node.get("rounds"):
         return run_rounds(node, ctx, run_dir, log)
     nid = node["id"]
+    parent_step = Path(run_dir).relative_to(session_root).as_posix()
+    step_base = nid if parent_step == "." else f"{parent_step}.{nid}"
     agent = node["agent"]
     task = render(node["prompt"], ctx)
     prompt = task
@@ -788,7 +903,7 @@ def run_node(node, ctx, run_dir, log):
     vcfg = node.get("verify")
     verifier = None
     if vcfg:
-        verifier = vcfg.get("by") or pick_reviewer(agent)
+        verifier = vcfg.get("by") or pick_reviewer(agent, coordinator=coordinator)
         if verifier == agent or _same_identity(verifier, agent):
             raise AgentError(f"{nid}: verifier must be independent of the author ({agent})")
 
@@ -796,19 +911,32 @@ def run_node(node, ctx, run_dir, log):
     issues = []
     for r in range(1, rounds + 1):
         nd = run_dir / (nid if rounds == 1 else f"{nid}.r{r}")
-        p = prompt
-        if issues:
-            p += "\n\n---\n# A verifier rejected your previous attempt. Fix these:\n- " + "\n- ".join(issues)
+        p = prompt if r == 1 else (
+            f"Round {r}/{rounds}. Continue from your previous session and return only the revised answer.\n"
+            "New verifier feedback:\n- " + "\n- ".join(issues or ["re-check the task criteria"]))
+        full_prompt = prompt if r == 1 else (
+            f"{prompt}\n\nRound {r}/{rounds}. Revise the answer using verifier feedback:\n- "
+            + "\n- ".join(issues or ["re-check the task criteria"]))
+        if r == 1 and ctx.get("_mam_round_index", 1) > 1:
+            changed = set(PLACEHOLDER.findall(node["prompt"])) & \
+                (ctx["_mam_round_nodes"] | {"previous"})
+            p = (f"Round {ctx['_mam_round_index']}/{ctx['_mam_round_limit']}. "
+                 "Continue your role and apply the same criteria to these new artifacts:\n" +
+                 "\n\n".join(f"{key}:\n{ctx[key]}" for key in sorted(changed)))
         log(f"  {nid} [{agent}] round {r}/{rounds}")
         reasoning = (validate_reasoning_config(node["reasoning"], allow_model=True)
                      if "reasoning" in node else {})
-        out = run_agent(agent, p, nd, timeout=node.get("timeout"),
-                        sandbox=node.get("sandbox"),
+        out = _run_step(agent, p, nd, run_dir=session_root,
+                        step=(step_base if rounds == 1 else f"{step_base}.r{r}"), ctx=ctx, log=log,
+                        coordinator=coordinator, no_in_session=no_in_session,
+                        fallback_prompt=full_prompt, session_key=nid,
+                        role=node.get("role"),
+                        timeout=node.get("timeout"), sandbox=node.get("sandbox"),
                         effort=reasoning.get("effort", node.get("effort")),
                         task_kind=reasoning.get("task_kind", node.get("task_kind")),
                         reasoning_dimensions=reasoning.get("dimensions"),
-                        model=reasoning.get("model"),
-                        routing_task=task, cap=reasoning.get("cap"))
+                        model=reasoning.get("model"), routing_task=task,
+                        cap=reasoning.get("cap"))
         out, note = _extract_memory_note(out) if node.get("remember") else (out, None)
         if not verifier:
             if note:
@@ -816,14 +944,23 @@ def run_node(node, ctx, run_dir, log):
             return out
         vr = (validate_reasoning_config(vcfg["reasoning"], allow_model=True)
               if vcfg and "reasoning" in vcfg else {})
-        vout = run_agent(verifier, VERIFY_TMPL.format(
+        full_verify_prompt = VERIFY_TMPL.format(
             task=task, author=agent, output=out[:60000],
             criteria="\n".join(f"- {c}" for c in vcfg["criteria"]),
-        ), nd / "verify", effort=vr.get("effort"),
+        ) + ("\nPrevious issues:\n" + "\n".join(issues) if r > 1 else "")
+        verify_prompt = full_verify_prompt if r == 1 else (
+            f"Round {r}/{rounds}. Review this new author output against the same criteria.\n"
+            f"Author: {agent}\nCriteria:\n{chr(10).join(f'- {c}' for c in vcfg['criteria'])}\n"
+            f"New output:\n{out[:60000]}\nPrevious issues:\n" + "\n".join(issues))
+        vout = _run_step(verifier, verify_prompt, nd / "verify", run_dir=session_root,
+                         step=(f"{step_base}.verify" if rounds == 1 else f"{step_base}.r{r}.verify"),
+                         ctx=ctx, log=log, coordinator=coordinator,
+                         no_in_session=no_in_session, fallback_prompt=full_verify_prompt,
+                         session_key=nid, role=node.get("role") or "review",
+                         effort=vr.get("effort"),
                          task_kind=vr.get("task_kind", "review"),
                          reasoning_dimensions=vr.get("dimensions"),
-                         model=vr.get("model"), routing_task=task,
-                         cap=vr.get("cap"))
+                         model=vr.get("model"), routing_task=task, cap=vr.get("cap"))
         ok, issues = parse_verdict(vout)
         log(f"  {nid} verified by [{verifier}]: {'PASS' if ok else 'FAIL'} ({len(issues)} issues)")
         if ok:
@@ -855,10 +992,32 @@ def display_path(path):
         return path.as_posix()
 
 
-def run_graph(spec, inputs, quiet=False):
+def _write_graph_state(run_dir, *, status, spec, inputs, done, results, failed, pending=None,
+                       coordinator=None):
+    (Path(run_dir) / "state.json").write_text(json.dumps({
+        "status": status, "done": sorted(done), "results": results,
+        "failed": sorted(failed), "pending": pending, "coordinator": coordinator,
+    }, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def run_graph(spec, inputs, quiet=False, run_dir=None, resume=False, initiator=None,
+              no_in_session=False):
+    if resume:
+        run_dir = Path(run_dir)
+        try:
+            state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+            spec = json.loads((run_dir / "graph.json").read_text(encoding="utf-8"))
+            inputs = json.loads((run_dir / "inputs.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"cannot resume graph {run_dir}: {exc}") from exc
+    else:
+        run_dir = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-{spec['name']}-{time.time_ns()}"
+        state = {"done": [], "results": {}, "failed": []}
     validate(spec, frozenset(inputs))
-    run_dir = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-{spec['name']}"
     run_dir.mkdir(parents=True, exist_ok=True)
+    if not resume:
+        (run_dir / "graph.json").write_text(json.dumps(spec, indent=2, ensure_ascii=False), encoding="utf-8")
+        (run_dir / "inputs.json").write_text(json.dumps(inputs, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def log(m):
         if not quiet:
@@ -866,11 +1025,19 @@ def run_graph(spec, inputs, quiet=False):
         with (run_dir / "journal.log").open("a", encoding="utf-8") as f:
             f.write(m + "\n")
 
+    coordinator = (detect_initiator(initiator) if initiator else
+                   (state.get("coordinator") if resume else None) or detect_initiator())
     ctx = dict(inputs)
+    ctx.update({"_mam_coordinator": coordinator, "_mam_no_in_session": no_in_session,
+                "_mam_session_dir": run_dir})
     nodes = {n["id"]: n for n in spec["nodes"]}
-    done, results, failed = set(), {}, set()
+    done, results, failed = set(state.get("done", [])), dict(state.get("results", {})), set(state.get("failed", []))
+    ctx.update({k: v for k, v in results.items() if not k.startswith("_")})
     log(f"graph {spec['name']} -> {display_path(run_dir)}")
+    if coordinator:
+        log(f"coordinator: {coordinator}" + (" (in-session disabled)" if no_in_session else ""))
 
+    paused = None
     with cf.ThreadPoolExecutor(max_workers=spec.get("concurrency", 4)) as pool:
         while len(done) < len(nodes):
             ready = [n for i, n in nodes.items()
@@ -895,21 +1062,40 @@ def run_graph(spec, inputs, quiet=False):
             futs = {pool.submit(run_node, n, ctx, run_dir, log): n for n in runnable}
             for fut in cf.as_completed(futs):
                 n = futs[fut]
+                node_done = False
                 try:
                     results[n["id"]] = ctx[n["id"]] = fut.result()
+                    node_done = True
                     # A block's argument is the interesting part of its run;
                     # keeping only the closing verdict throws the case away.
                     for m in _sub_nodes(n):
                         if m["id"] in ctx:
                             results[m["id"]] = ctx[m["id"]]
+                except CoordinatorHandoff as e:
+                    paused = e
+                    log(str(e))
                 except Exception as e:
                     results[n["id"]] = f"FAILED: {e}"     # never enters ctx
                     failed.add(n["id"])
                     log(f"  !! {n['id']}: {e}")
-                done.add(n["id"])
+                    node_done = True
+                if node_done:
+                    done.add(n["id"])
 
+            if paused:
+                _write_graph_state(run_dir, status="paused", spec=spec, inputs=inputs,
+                                   done=done, results=results, failed=failed,
+                                   pending={"step": paused.step, "path": str(paused.path)},
+                                   coordinator=coordinator)
+                (run_dir / "result.json").write_text(json.dumps(
+                    {"status": "paused", "failed": sorted(failed), "results": results},
+                    indent=2, ensure_ascii=False), encoding="utf-8")
+                return results, run_dir, failed
+
+    _write_graph_state(run_dir, status="complete", spec=spec, inputs=inputs,
+                       done=done, results=results, failed=failed, coordinator=coordinator)
     (run_dir / "result.json").write_text(json.dumps(
-        {"failed": sorted(failed), "results": results}, indent=2, ensure_ascii=False),
+        {"status": "complete", "failed": sorted(failed), "results": results}, indent=2, ensure_ascii=False),
         encoding="utf-8")
     return results, run_dir, failed
 
@@ -928,6 +1114,11 @@ def cmd_doctor(a):
         print("roles     (none)  " + COLD_START.splitlines()[0])
     print(f"vault     {MEM}" + ("   (bundled seed — set AGENT_HARNESS_MEMORY to keep notes"
                                 " out of the clone)" if MEM == HOME / "memory" else ""))
+    for role in CFG.get("role_prompts", {}):
+        for path in REGISTRY.role_files(role):
+            present = path.is_file()
+            print(f"{'OK  ' if present else 'MISS'} role_prompts.{role}: {path}"
+                  + (" (config error: file missing)" if not present else ""))
     for name, profile in CFG["agents"].items():
         try:
             exe, why = resolve(name)[0], None
@@ -975,6 +1166,8 @@ def deliver(out, produce):
     path.unlink(missing_ok=True)   # a stale answer must not satisfy `wait`
     try:
         text = produce()
+    except CoordinatorHandoff as e:
+        text = f"PAUSED: {e}\nHandoff: {display_path(e.path)}\n"
     except (AgentError, ValueError, OSError, subprocess.TimeoutExpired) as e:
         text = f"FAILED: {e}"
     tmp = path.with_name(path.name + ".tmp")
@@ -1011,15 +1204,49 @@ def cmd_ask(a):
         prompt = mem_context(prompt, CFG["memory_k"]) + prompt
     d = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-ask-{a.agent}"
     dimensions = load_reasoning_dimensions(a.reasoning)
-    deliver(a.out, lambda: run_agent(a.agent, prompt, d, effort=a.effort, task_kind=a.task_kind, reasoning_dimensions=dimensions, model=a.model, routing_task=routing_task))
+    session_dir = _thread_dir(a.thread) if getattr(a, "thread", None) else d
+    session_path = _thread_session(session_dir, a.agent) if getattr(a, "thread", None) else None
+    first_file = session_path.with_suffix(".prompt") if session_path else None
+    first = first_file.read_text(encoding="utf-8") if first_file and first_file.exists() else None
+    full = f"{first}\n\nRound continuation:\n{prompt}" if first else prompt
+
+    def produce():
+        answer = run_agent(a.agent, prompt, d, session_dir=session_dir,
+                           session_path=session_path, fallback_prompt=full,
+                           role=getattr(a, "role", None),
+                           effort=a.effort, task_kind=a.task_kind,
+                           reasoning_dimensions=dimensions, model=a.model,
+                           routing_task=routing_task)
+        if first_file and first is None:
+            first_file.parent.mkdir(parents=True, exist_ok=True)
+            first_file.write_text(prompt, encoding="utf-8")
+        return answer
+
+    deliver(a.out, produce)
+
+
+def _thread_dir(name):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) or name in {".", ".."}:
+        raise ValueError("thread name must contain only letters, digits, dot, underscore or hyphen")
+    return RUNS / "threads" / name
+
+
+def _thread_session(directory, agent):
+    name = agent if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", agent) else \
+        hashlib.sha256(agent.encode("utf-8")).hexdigest()[:24]
+    return directory / f"{name}.id"
 
 
 def cmd_review(a):
     """Cross-review: whoever wrote it does not review it."""
     dimensions = load_reasoning_dimensions(a.reasoning)
-    reviewer = a.by or pick_reviewer(a.author)
+    coordinator = detect_initiator(getattr(a, "initiator", None))
+    reviewer = a.by or pick_reviewer(a.author, coordinator=coordinator)
     if reviewer == a.author or _same_identity(reviewer, a.author):
         sys.exit("refusing self-review: reviewer must be independent of the author")
+    if reviewer == coordinator and not getattr(a, "no_in_session", False):
+        print(f"reviewer is the coordinator ({reviewer}): review in-session")
+        return
     target = Path(a.path).read_text(encoding="utf-8", errors="replace") if a.path else \
         subprocess.run(["git", "diff", "HEAD"], cwd=WORK, capture_output=True,
                        text=True, encoding="utf-8", errors="replace").stdout
@@ -1027,11 +1254,43 @@ def cmd_review(a):
         sys.exit("nothing to review")
     d = RUNS / f"{time.strftime('%Y%m%d-%H%M%S')}-review"
     print(f"[{a.author}]'s work reviewed by [{reviewer}]", file=sys.stderr)
-    deliver(a.out, lambda: run_agent(reviewer, VERIFY_TMPL.format(
-        task=a.task, author=a.author, output=target[:60000],
-        criteria="\n".join(f"- {c}" for c in a.criteria),
-    ), d, effort=a.effort, task_kind=a.task_kind or "review",
-       reasoning_dimensions=dimensions, model=a.model, routing_task=a.task))
+    prompt = VERIFY_TMPL.format(task=a.task, author=a.author, output=target[:60000],
+                                criteria="\n".join(f"- {c}" for c in a.criteria))
+    session_dir = _thread_dir(a.thread) if getattr(a, "thread", None) else d
+    session_path = _thread_session(session_dir, reviewer) if getattr(a, "thread", None) else None
+    continued = bool(session_path and session_path.exists() and
+                     REGISTRY.resolve(reviewer)[2].session_persistence)
+    delta = ("Round continuation: re-review the new output below against the same task and criteria; "
+             "your previous findings are in this session.\nNew output:\n" + target[:60000]) \
+        if continued else prompt
+    deliver(a.out, lambda: run_agent(reviewer, delta, d, session_dir=session_dir,
+                                     session_path=session_path, fallback_prompt=prompt,
+                                     role=getattr(a, "role", None) or "review",
+                                     effort=a.effort,
+                                     task_kind=a.task_kind or "review",
+                                     reasoning_dimensions=dimensions, model=a.model,
+                                     routing_task=a.task))
+
+
+def cmd_verdict(a):
+    run_dir = Path(a.run).resolve()
+    try:
+        pending = json.loads((run_dir / "pending-handoff.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        sys.exit(f"cannot read pending coordinator handoff: {exc}")
+    raw = sys.stdin.read() if a.file == "-" else Path(a.file).read_text(encoding="utf-8", errors="replace")
+    if not raw.strip():
+        sys.exit("verdict is empty")
+    path = _step_file(run_dir, pending["step"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(raw, encoding="utf-8")
+    (run_dir / "pending-handoff.json").unlink(missing_ok=True)
+    print(f"verdict accepted for {pending['step']} in {display_path(run_dir)}")
+    if not a.no_resume and (run_dir / "graph.json").exists():
+        results, _, failed = run_graph({}, {}, resume=True, run_dir=run_dir,
+                                       quiet=False, initiator=getattr(a, "initiator", None),
+                                       no_in_session=getattr(a, "no_in_session", False))
+        print(json.dumps({"failed": sorted(failed), "results": results}, ensure_ascii=False))
 
 
 def load_reasoning_dimensions(value):
@@ -1121,17 +1380,36 @@ def cmd_setup(a):
 
 
 def cmd_graph(a):
-    spec = json.loads(Path(a.spec if os.sep in a.spec or a.spec.endswith(".json")
-                           else HOME / "graphs" / f"{a.spec}.json").read_text(encoding="utf-8"))
-    inputs = dict(kv.split("=", 1) for kv in a.set or [])
-    if a.input:
-        inputs["input"] = a.input
-    spec = bind_roles(spec)
-    results, d, failed = run_graph(spec, inputs)
+    if getattr(a, "resume", None):
+        d = Path(a.resume).resolve()
+        spec = json.loads((d / "graph.json").read_text(encoding="utf-8"))
+        inputs = {}
+        results, d, failed = run_graph(spec, inputs, resume=True, run_dir=d,
+                                       initiator=getattr(a, "initiator", None),
+                                       no_in_session=getattr(a, "no_in_session", False))
+    else:
+        if not a.spec:
+            sys.exit("graph needs a spec unless --resume is supplied")
+        spec = json.loads(Path(a.spec if os.sep in a.spec or a.spec.endswith(".json")
+                               else HOME / "graphs" / f"{a.spec}.json").read_text(encoding="utf-8"))
+        inputs = dict(kv.split("=", 1) for kv in a.set or [])
+        if a.input:
+            inputs["input"] = a.input
+        spec = bind_roles(spec, initiator=getattr(a, "initiator", None))
+        options = {}
+        if getattr(a, "initiator", None) is not None:
+            options["initiator"] = a.initiator
+        if getattr(a, "no_in_session", False):
+            options["no_in_session"] = True
+        results, d, failed = run_graph(spec, inputs, **options)
     print(f"\n=== {spec['name']} ===")
     for k, v in results.items():
         print(f"\n--- {k} ---\n{v}")
     print(f"\nrun: {display_path(d)}")
+    status = "paused" if (d / "state.json").exists() and json.loads((d / "state.json").read_text(encoding="utf-8")).get("status") == "paused" else "complete"
+    if status == "paused":
+        print(f"\npaused: submit `agent-harness verdict {display_path(d)} <file|->` to resume")
+        return
     if failed:
         sys.exit(f"\n{len(failed)} node(s) failed or were skipped: {', '.join(sorted(failed))}")
 
@@ -1157,6 +1435,9 @@ def main():
     ap = argparse.ArgumentParser(prog="mam", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="explicit provider/role configuration JSON")
+    ap.add_argument("--initiator", help="coordinator agent alias (or use MAM_INITIATOR)")
+    ap.add_argument("--no-in-session", action="store_true",
+                    help="always spawn the coordinator CLI instead of handing steps back")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("doctor", help="what is installed, memory health")
@@ -1176,6 +1457,8 @@ def main():
     p.add_argument("--reasoning", help="JSON object or path to JSON dimensions")
     p.add_argument("--model")
     p.add_argument("--out", help="write the full answer here, print only its head; pair with wait")
+    p.add_argument("--thread", help="reuse this agent's CLI session across ask calls")
+    p.add_argument("--role", help="role prompt to apply to this call")
     p.set_defaults(fn=cmd_ask)
 
     p = sub.add_parser("review", help="cross-review (author is never the reviewer)")
@@ -1194,6 +1477,10 @@ def main():
     p.add_argument("--reasoning", help="JSON object or path with all five reasoning dimensions")
     p.add_argument("--model")
     p.add_argument("--out", help="write the full answer here, print only its head; pair with wait")
+    p.add_argument("--thread", help="reuse this reviewer's CLI session across review calls")
+    p.add_argument("--role", help="role prompt (default: review)")
+    p.add_argument("--initiator", default=argparse.SUPPRESS)
+    p.add_argument("--no-in-session", action="store_true", default=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_review)
 
     p = sub.add_parser("wait", help="block until ask/review --out files exist, print their heads")
@@ -1201,6 +1488,14 @@ def main():
     p.add_argument("--timeout", type=int, default=600,
                    help="seconds; exit 2 if any run is still going (default 600)")
     p.set_defaults(fn=cmd_wait)
+
+    p = sub.add_parser("verdict", help="accept a coordinator handoff and resume its graph")
+    p.add_argument("run", help="paused run directory")
+    p.add_argument("file", help="verdict file, or - to read stdin")
+    p.add_argument("--initiator", default=argparse.SUPPRESS)
+    p.add_argument("--no-in-session", action="store_true", default=argparse.SUPPRESS)
+    p.add_argument("--no-resume", action="store_true", help="store the verdict without resuming")
+    p.set_defaults(fn=cmd_verdict)
 
     p = sub.add_parser("init", help="record who fills each graph role on this machine")
     p.add_argument("--config", dest="config", default=argparse.SUPPRESS,
@@ -1233,8 +1528,11 @@ def main():
     p = sub.add_parser("graph", help="run a graph spec")
     p.add_argument("--config", dest="config", default=argparse.SUPPRESS,
                    help="explicit provider/role configuration JSON")
-    p.add_argument("spec", help="graphs/<name>.json, or a name")
+    p.add_argument("spec", nargs="?", help="graphs/<name>.json, or a name")
     p.add_argument("--input"); p.add_argument("--set", action="append", metavar="K=V")
+    p.add_argument("--resume", help="resume a paused run directory")
+    p.add_argument("--initiator", default=argparse.SUPPRESS)
+    p.add_argument("--no-in-session", action="store_true", default=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_graph)
 
     p = sub.add_parser("mem", help="shared memory vault")

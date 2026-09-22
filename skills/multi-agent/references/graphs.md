@@ -10,6 +10,7 @@ in the project's `.mam/graphs/<name>.json` and run
 |---|---|
 | `id` | Unique name; `{id}` in later prompts inserts this node's output |
 | `agent` | A configured profile, a role (`spec`, `implement`, ...), or `reviewer:N` |
+| `role` | Optional role prompt bundle; overrides the agent profile's role |
 | `needs` | Nodes this one waits for; independent nodes run in parallel |
 | `prompt` | Text; `{input}` is the CLI input, `--set key=value` adds more keys |
 | `verify` | `{"by": ..., "max_rounds": N, "criteria": [...]}` — a different agent gates each attempt; criteria are required |
@@ -49,6 +50,11 @@ assumptions: <what was not verified>
 
 A verifier fails an attempt whose tail is missing or claims a check it did not
 show. Read-only and debate nodes skip the tail.
+
+Coordinator-bound nodes pause with a prompt file in the run directory. Answer
+in-session, then submit `agent-harness verdict <run> <file|->` and rerun the
+graph to continue. Set `--initiator <alias>` explicitly or configure
+`initiator_detection`; `--no-in-session` forces legacy CLI spawning.
 
 Improving a result within a step is a loop (`verify`); handing work between
 components is a graph (`needs`).

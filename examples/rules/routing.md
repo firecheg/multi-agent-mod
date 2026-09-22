@@ -1,15 +1,21 @@
 # Routing
 
-For substantial engineering work, the coordinator owns analysis and judgment; configured summary workers handle orientation and classification, and configured code workers handle implementation and author tests. The coordinator does not implement, write tests or explore code itself, even when doing it directly looks faster; when unsure whether work is substantial, delegate.
+The coordinator owns analysis, decisions, specification acceptance, and judgment. Route by kind of work, not simply by size. Implementation, tests, debugging, and code exploration beyond one or two files go to configured workers. Small reversible operations stay local.
 
-Substantial means: a code change in more than one file or beyond about 20 lines, a new feature, debugging, or code exploration beyond one or two files. Only answers, reading a single file and one-line configuration edits stay local with minimal necessary tools.
+| Task | Route |
+|---|---|
+| Large files, logs, or a code map | `demo-worker` with `--role reading`; narrow facts, `file:line`, short quotes, maximum length, no conclusions |
+| Live research | Configured research agent with `--role research`; primary sources, links and dates, facts apart from guesses |
+| Analysis, design, trade-offs, specs, acceptance | Coordinator in-session; never delegated |
+| Implementation and author tests | Configured implementation agent with `--role implementation` |
+| Behavior check against criteria | Configured QA agent with `--role qa`; name the criteria and base branch |
+| Independent review | Other provider's reviewer with `--role review` and `review --thread`; coordinator's own provider reviews in-session. For diffs up to about 300 lines, coordinator reads them; for larger diffs, other-provider reviewer reads first and coordinator verifies findings |
+| Fix after review | The same author, with `--thread` and only new findings |
 
-The coordinator keeps decisions, not raw output. Start workers with `ask|review ... --out <file>` and collect them with one `wait <files>` instead of polling logs; send checks to a file and keep only the result. For work that spans several milestones, keep a task state file (goal, decisions, branches, what is verified, what is left) and update it at each milestone, so compaction or a fresh thread loses only raw output.
+The bundled `demo-worker` and `demo-reviewer` are offline placeholders. Replace aliases with your configured agents before using paid routes. Never use the author or an alias with the same author identity as an independent reviewer.
 
-Minimal-solution guidance (for example a "lazy senior engineer" skill) belongs in code worker tasks, not in the coordinator: the worker writes the minimal solution itself, and the coordinator reviews task fit and defects only, without separate simplification passes.
+For a code worker, save a full specification to a file: first line `/ponytail` when that skill is installed; finished decisions; files and touchpoints; files to read; done criteria; tests to add; exact check command and known pre-existing failures; report format and line limit. CLI workers start without user settings, MCP servers, or skills; the harness prepends `ROLE: <role>` and the configured role files. The specification decides any further reading.
 
-Choose effort per task: `low` mechanical, `medium` ordinary engineering, `high` difficult diagnosis or safety, `xhigh` exceptional cross service work. `max` requires explicit permission; unsupported settings are `effective unset`.
+Start workers with `agent-harness ask|review ... --out <file>` and collect them with one `agent-harness wait <files>`. For multiple rounds, reuse `--thread`. A coordinator-bound graph step writes a handoff prompt; provide the verdict with `agent-harness verdict <run> <file|->` and resume the graph. Keep a short milestone state file for long work.
 
-Give a route report only for delegated or substantial work: the actual configured model, role, status and run reference in the first update, on routing changes and in the final update. Simple answers have no route report.
-
-Allow one initial attempt and one targeted correction after a diagnosed failure. After two failures, reassess scope or escalate for a factual reason. Check route availability first; do not spend a paid call on an unavailable route.
+Choose effort by reasoning difficulty: `low` mechanical, `medium` ordinary engineering, `high` difficult diagnosis or safety, `xhigh` exceptional work. Request `max` only with explicit permission. Report the actual model, role, status, and run reference for delegated work. Check route availability before a paid call; after one attempt and one targeted correction, reassess rather than repeating blindly.
