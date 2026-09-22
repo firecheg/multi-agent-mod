@@ -53,8 +53,8 @@ caught, so declare the relationship.
 ## Commands
 
 ```sh
-agent-harness ask <agent> "..." --memory --effort medium
-agent-harness review <author> --criteria "..." --criteria "..." --path src/file.py --task "..."
+agent-harness ask <agent> "..." --memory --effort medium --role implementation --thread feature-a
+agent-harness review <author> --criteria "..." --criteria "..." --path src/file.py --task "..." --thread feature-a
 agent-harness graph research --input "..."   # web ∥ repository -> synthesis; read-only
 agent-harness graph build --input "..."      # spec -> gated implement -> prosecution -> defence -> judge
 agent-harness graph build-2r --input "..."   # gated implement -> design ∥ correctness review -> judge
@@ -63,6 +63,7 @@ agent-harness mem context "topic" -k 3
 agent-harness mem lint
 agent-harness ask <agent> - --out .mam/task/answer.md < task.md   # full answer to file, head to stdout
 agent-harness wait .mam/task/answer.md .mam/task/review.md --timeout 600
+agent-harness verdict <run> <file|->   # submit a coordinator-bound graph decision
 ```
 
 Every step you take re-sends your whole history, so do not paste worker
@@ -75,6 +76,13 @@ the full file only when the head is not enough.
 `review` refuses to run without `--criteria`: the reviewer checks those and
 nothing else, so a missing criterion is an unchecked one. Without `--path` it
 reviews `git diff HEAD`.
+
+Use `--thread name` on later `ask`/`review` rounds to resume that agent's CLI
+session. `--role name` selects a configured `role_prompts` bundle; fresh workers
+receive its files, while resumed workers receive only the role label and delta.
+If `--initiator` or `initiator_detection` identifies you as a graph agent, the
+graph writes a handoff prompt instead of spawning your CLI. Read it, submit
+`verdict`, then resume the graph. `--no-in-session` opts out of handoffs.
 
 A graph run writes `.mam/<run>/journal.log` and `result.json` in the project
 and exits non-zero if any node failed or was skipped. Read them before you

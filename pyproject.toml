@@ -19,7 +19,7 @@ py-modules = ["mam"]
 packages = ["execution", "examples", "demo", "memory", "graphs", "presets", "skills"]
 
 [tool.setuptools.package-data]
-examples = ["*.json"]
+examples = ["*.json", "rules/*.md"]
 graphs = ["*.json"]
 presets = ["*.json"]
 skills = ["*/*.md", "*/references/*.md"]

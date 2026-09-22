@@ -73,6 +73,7 @@ class EnvRoundTripTests(unittest.TestCase):
                               "ANTHROPIC_AUTH_TOKEN": "${HARNESS_TEST_TOKEN}",
                               "ANTHROPIC_API_KEY": "", "ANTHROPIC_MODEL": "{model}"}, script)
             registry = ProviderRegistry(config)
+            registry.config["_config_path"] = str(ROOT / "examples/default-config.json")
             with patch.dict(os.environ, {"HARNESS_TEST_TOKEN": "secret-from-env", "ANTHROPIC_API_KEY": "leak"}):
                 out = worker_cli.invoke("hi", Path(tmp, "run"), {"agent": "demo-worker"}, registry=registry)
             self.assertEqual((out["base"], out["token"], out["api_key_present"], out["model_env"]),
@@ -127,6 +128,24 @@ class BackendPresetTests(unittest.TestCase):
         self.assertEqual(config["providers"]["claude-glm"]["env"]["ANTHROPIC_AUTH_TOKEN"], "${MY_GLM_KEY}")
         self.assertTrue(ProviderRegistry(config).primary_allowed("glm", "opus"),
                         "Claude Code with GLM inside is not the same provider as Anthropic")
+
+    def test_codex_keeps_its_windows_sandbox_without_user_config(self):
+        # --ignore-user-config drops [windows] sandbox; without it Codex on
+        # Windows silently runs workspace-write as read-only.
+        provider = cold_start.load_presets()["codex"]["provider"]
+        for key in ("argv", "resume_argv"):
+            with self.subTest(argv=key):
+                argv = provider[key]
+                self.assertIn("--ignore-user-config", argv)
+                at = argv.index('windows.sandbox="unelevated"')
+                self.assertEqual(argv[at - 1], "-c")
+
+    def test_claude_worker_can_run_commands_headless(self):
+        # Headless -p cannot answer a prompt, so acceptEdits denies every
+        # shell command (tests included); auto lets the classifier decide.
+        preset = cold_start.load_presets()["claude"]
+        self.assertEqual(preset["provider"]["default_sandbox"], "auto")
+        self.assertIn("auto", preset["sandbox_modes"])
 
     def test_every_preset_says_whether_it_ran_live(self):
         for name, preset in cold_start.load_presets().items():

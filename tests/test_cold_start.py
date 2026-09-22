@@ -173,16 +173,17 @@ class FakeCliRoundTripTests(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_stdin_and_file_providers_answer(self):
+        sent = "ROLE: worker\n\nhello from harness"
         for agent, stdin_expected in (("writer", None), ("reader", "")):
             with self.subTest(agent=agent):
                 run = self.tmp / "runs" / agent
                 out = worker_cli.invoke("hello from harness", run,
                                         {"agent": agent, "effort": "high"}, registry=self.registry, cwd=self.tmp)
-                self.assertEqual(out["result"], "echo:hello from harness")
+                self.assertEqual(out["result"], "echo:" + sent)
                 self.assertEqual(out["effort"], "high")
                 if stdin_expected is not None:
                     self.assertEqual(out["stdin_when_file"], stdin_expected, "file mode leaves stdin empty")
-                    self.assertEqual((run / "prompt.md").read_text(encoding="utf-8"), "hello from harness")
+                    self.assertEqual((run / "prompt.md").read_text(encoding="utf-8"), sent)
 
     def test_setup_cli_writes_config_that_doctor_loads(self):
         answers = {"agents": {"g": {"preset": "gemini", "model": "gemini-x", "path": sys.executable}}}
