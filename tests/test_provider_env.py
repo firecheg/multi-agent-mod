@@ -140,6 +140,13 @@ class BackendPresetTests(unittest.TestCase):
                 at = argv.index('windows.sandbox="unelevated"')
                 self.assertEqual(argv[at - 1], "-c")
 
+    def test_claude_worker_can_run_commands_headless(self):
+        # Headless -p cannot answer a prompt, so acceptEdits denies every
+        # shell command (tests included); auto lets the classifier decide.
+        preset = cold_start.load_presets()["claude"]
+        self.assertEqual(preset["provider"]["default_sandbox"], "auto")
+        self.assertIn("auto", preset["sandbox_modes"])
+
     def test_every_preset_says_whether_it_ran_live(self):
         for name, preset in cold_start.load_presets().items():
             with self.subTest(preset=name):

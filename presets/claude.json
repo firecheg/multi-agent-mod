@@ -40,7 +40,7 @@
       "--permission-mode",
       "{sandbox}"
     ],
-    "default_sandbox": "acceptEdits",
+    "default_sandbox": "auto",
     "session_persistence": true,
     "resume_args": ["--resume", "{session_id}"],
     "session_id_field": "session_id",
@@ -60,6 +60,6 @@
     "manual",
     "plan"
   ],
-  "checked": "Claude Code 2.1.220 `claude --help`; one-shot call run live 2026-09-13",
-  "notes": "Print mode reads the prompt from stdin; --output-format json returns one object with result and is_error. Model accepts aliases such as sonnet or opus. Under acceptEdits file edits are accepted but shell commands still ask for permission, which headless mode cannot grant: allow the specific commands a reviewer must run (for example with --allowedTools) or pick a different permission mode per node."
+  "checked": "Claude Code 2.1.220 `claude --help`; one-shot call run live 2026-09-13; Claude Code 2.1.280 headless auto mode ran a unittest command live 2026-09-23",
+  "notes": "Print mode reads the prompt from stdin; --output-format json returns one object with result and is_error. Model accepts aliases such as sonnet or opus. The default is auto: its classifier approves ordinary edits and commands such as running tests and blocks risky ones, which headless mode needs because nobody can answer a prompt. Under acceptEdits file edits are accepted but every shell command is denied in headless mode; use it only with --allowedTools for the specific commands, or when auto mode is unavailable on your account."
 }

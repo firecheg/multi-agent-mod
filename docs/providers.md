@@ -171,3 +171,10 @@ id. `codex exec resume` accepts `--skip-git-repo-check`, `--ignore-user-config`,
 `-s workspace-write` to `read-only`, so a worker can neither edit files nor run
 commands. `-c windows.sandbox="unelevated"` restores the sandbox without admin
 rights; the `[windows]` table has no effect elsewhere.
+
+The `claude` preset maps the sandbox to `--permission-mode` and defaults to
+`auto`. Headless `-p` calls cannot answer a permission prompt, so under
+`acceptEdits` every shell command, including running tests, is denied and a
+worker can only edit files. `auto` lets the permission classifier approve
+ordinary commands and block risky ones. The third-party `claude-*` presets keep
+`acceptEdits`; pair it with `--allowedTools` for the commands a worker needs.
